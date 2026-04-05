@@ -1,5 +1,5 @@
 let lastTabOpenDedupe = { dedupeKey: "", timestampMillis: 0 };
-function openTabUnlessDuplicate(dedupeKey, createUrl) {
+function openTabUnlessDuplicate(dedupeKey, createUrl, insertIndex) {
   const now = Date.now();
   if (
     lastTabOpenDedupe.dedupeKey === dedupeKey &&
@@ -8,41 +8,69 @@ function openTabUnlessDuplicate(dedupeKey, createUrl) {
     return;
   }
   lastTabOpenDedupe = { dedupeKey, timestampMillis: now };
-  chrome.tabs.create({ url: createUrl() });
+  const createProps = { url: createUrl() };
+  if (typeof insertIndex === "number") {
+    createProps.index = insertIndex;
+  }
+  chrome.tabs.create(createProps);
 }
 
-function openGoogleSearchForSelection(selectedText) {
+function openGoogleSearchForSelection(selectedText, insertIndex) {
   openTabUnlessDuplicate(
     "google-search:" + selectedText,
     () =>
-      `https://www.google.com/search?q=${encodeURIComponent(selectedText)}`
+      `https://www.google.com/search?q=${encodeURIComponent(selectedText)}`,
+    insertIndex
   );
 }
 
-function openGoogleTranslateRuForSelection(selectedText) {
+function openGoogleTranslateRuForSelection(selectedText, insertIndex) {
   openTabUnlessDuplicate(
     "translate-ru:" + selectedText,
     () =>
-      `https://translate.google.com/?sl=auto&tl=ru&text=${encodeURIComponent(selectedText)}`
+      `https://translate.google.com/?sl=auto&tl=ru&text=${encodeURIComponent(selectedText)}`,
+    insertIndex
   );
 }
 
-function openGoogleWhatIsSearchForSelection(selectedText) {
+function openGoogleWhatIsSearchForSelection(selectedText, insertIndex) {
   const googleQuery = `What is ${selectedText}`;
   openTabUnlessDuplicate(
     "what-is:" + selectedText,
     () =>
-      `https://www.google.com/search?q=${encodeURIComponent(googleQuery)}`
+      `https://www.google.com/search?q=${encodeURIComponent(googleQuery)}`,
+    insertIndex
   );
 }
 
-function openGoogleEtymologySearchForSelection(selectedText) {
+function openGoogleEtymologySearchForSelection(selectedText, insertIndex) {
   const googleQuery = `${selectedText} etymology`;
   openTabUnlessDuplicate(
     "etymology:" + selectedText,
     () =>
-      `https://www.google.com/search?q=${encodeURIComponent(googleQuery)}`
+      `https://www.google.com/search?q=${encodeURIComponent(googleQuery)}`,
+    insertIndex
   );
+}
+
+async function closeTabsToTheRightOfActive() {
+  const [activeTab] = await chrome.tabs.query({
+    active: true,
+    currentWindow: true,
+  });
+  if (!activeTab?.id || typeof activeTab.index !== "number") return;
+  const tabsInWindow = await chrome.tabs.query({ currentWindow: true });
+  const idsToRemove = tabsInWindow
+    .filter(
+      (t) =>
+        typeof t.id === "number" &&
+        typeof t.index === "number" &&
+        t.index > activeTab.index
+    )
+    .map((t) => t.id);
+  if (idsToRemove.length) {
+    await chrome.tabs.remove(idsToRemove);
+  }
 }
 
 async function readSelectedTextFromTab(tabId) {
@@ -58,6 +86,10 @@ async function readSelectedTextFromTab(tabId) {
 }
 
 async function runCommand(commandName) {
+  if (commandName === "close-tabs-to-the-right") {
+    await closeTabsToTheRightOfActive();
+    return;
+  }
   const [activeTab] = await chrome.tabs.query({
     active: true,
     currentWindow: true,
@@ -75,14 +107,16 @@ async function runCommand(commandName) {
 
   const selectedText = await readSelectedTextFromTab(activeTab.id);
   if (!selectedText) return;
+  const insertIndex =
+    typeof activeTab.index === "number" ? activeTab.index + 1 : undefined;
   if (commandName === "search-selection-google") {
-    openGoogleSearchForSelection(selectedText);
+    openGoogleSearchForSelection(selectedText, insertIndex);
   } else if (commandName === "search-selection-what-is") {
-    openGoogleWhatIsSearchForSelection(selectedText);
+    openGoogleWhatIsSearchForSelection(selectedText, insertIndex);
   } else if (commandName === "search-selection-etymology") {
-    openGoogleEtymologySearchForSelection(selectedText);
+    openGoogleEtymologySearchForSelection(selectedText, insertIndex);
   } else if (commandName === "translate-selection-ru") {
-    openGoogleTranslateRuForSelection(selectedText);
+    openGoogleTranslateRuForSelection(selectedText, insertIndex);
   }
 }
 
@@ -90,16 +124,18 @@ chrome.commands.onCommand.addListener((commandName) => {
   runCommand(commandName);
 });
 
-chrome.runtime.onMessage.addListener((message) => {
+chrome.runtime.onMessage.addListener((message, sender) => {
   if (typeof message?.text !== "string") return;
   const selectedText = message.text.trim();
   if (!selectedText) return;
+  const insertIndex =
+    typeof sender.tab?.index === "number" ? sender.tab.index + 1 : undefined;
   if (message.command === "search-selection-google") {
-    openGoogleSearchForSelection(selectedText);
+    openGoogleSearchForSelection(selectedText, insertIndex);
   } else if (message.command === "search-selection-what-is") {
-    openGoogleWhatIsSearchForSelection(selectedText);
+    openGoogleWhatIsSearchForSelection(selectedText, insertIndex);
   } else if (message.command === "search-selection-etymology") {
-    openGoogleEtymologySearchForSelection(selectedText);
+    openGoogleEtymologySearchForSelection(selectedText, insertIndex);
   }
 });
 
@@ -133,13 +169,16 @@ chrome.runtime.onInstalled.addListener(ensureContextMenus);
 chrome.contextMenus.onClicked.addListener((contextMenuClickInfo) => {
   const selectedText = contextMenuClickInfo.selectionText?.trim();
   if (!selectedText) return;
+  const tab = contextMenuClickInfo.tab;
+  const insertIndex =
+    typeof tab?.index === "number" ? tab.index + 1 : undefined;
   if (contextMenuClickInfo.menuItemId === "search-selection-google") {
-    openGoogleSearchForSelection(selectedText);
+    openGoogleSearchForSelection(selectedText, insertIndex);
   } else if (contextMenuClickInfo.menuItemId === "search-selection-what-is") {
-    openGoogleWhatIsSearchForSelection(selectedText);
+    openGoogleWhatIsSearchForSelection(selectedText, insertIndex);
   } else if (contextMenuClickInfo.menuItemId === "search-selection-etymology") {
-    openGoogleEtymologySearchForSelection(selectedText);
+    openGoogleEtymologySearchForSelection(selectedText, insertIndex);
   } else if (contextMenuClickInfo.menuItemId === "translate-selection-ru") {
-    openGoogleTranslateRuForSelection(selectedText);
+    openGoogleTranslateRuForSelection(selectedText, insertIndex);
   }
 });

@@ -27,6 +27,15 @@ function openGoogleTranslateRuForSelection(selectedText) {
   );
 }
 
+function openGoogleWhatIsSearchForSelection(selectedText) {
+  const googleQuery = `What is ${selectedText}`;
+  openTabUnlessDuplicate(
+    "what-is:" + selectedText,
+    () =>
+      `https://www.google.com/search?q=${encodeURIComponent(googleQuery)}`
+  );
+}
+
 function openGoogleEtymologySearchForSelection(selectedText) {
   const googleQuery = `${selectedText} etymology`;
   openTabUnlessDuplicate(
@@ -68,6 +77,8 @@ async function runCommand(commandName) {
   if (!selectedText) return;
   if (commandName === "search-selection-google") {
     openGoogleSearchForSelection(selectedText);
+  } else if (commandName === "search-selection-what-is") {
+    openGoogleWhatIsSearchForSelection(selectedText);
   } else if (commandName === "search-selection-etymology") {
     openGoogleEtymologySearchForSelection(selectedText);
   } else if (commandName === "translate-selection-ru") {
@@ -85,6 +96,8 @@ chrome.runtime.onMessage.addListener((message) => {
   if (!selectedText) return;
   if (message.command === "search-selection-google") {
     openGoogleSearchForSelection(selectedText);
+  } else if (message.command === "search-selection-what-is") {
+    openGoogleWhatIsSearchForSelection(selectedText);
   } else if (message.command === "search-selection-etymology") {
     openGoogleEtymologySearchForSelection(selectedText);
   }
@@ -94,17 +107,22 @@ function ensureContextMenus() {
   chrome.contextMenus.removeAll(() => {
     chrome.contextMenus.create({
       id: "search-selection-google",
-      title: "Search selection in Google",
+      title: "Search selection in Google (Alt+S)",
+      contexts: ["selection"],
+    });
+    chrome.contextMenus.create({
+      id: "search-selection-what-is",
+      title: "What is… (Alt+W)",
       contexts: ["selection"],
     });
     chrome.contextMenus.create({
       id: "search-selection-etymology",
-      title: "Search etymology in Google",
+      title: "Search etymology in Google (Alt+E)",
       contexts: ["selection"],
     });
     chrome.contextMenus.create({
       id: "translate-selection-ru",
-      title: "Translate selection to Russian",
+      title: "Translate selection to Russian (Alt+T)",
       contexts: ["selection"],
     });
   });
@@ -117,6 +135,8 @@ chrome.contextMenus.onClicked.addListener((contextMenuClickInfo) => {
   if (!selectedText) return;
   if (contextMenuClickInfo.menuItemId === "search-selection-google") {
     openGoogleSearchForSelection(selectedText);
+  } else if (contextMenuClickInfo.menuItemId === "search-selection-what-is") {
+    openGoogleWhatIsSearchForSelection(selectedText);
   } else if (contextMenuClickInfo.menuItemId === "search-selection-etymology") {
     openGoogleEtymologySearchForSelection(selectedText);
   } else if (contextMenuClickInfo.menuItemId === "translate-selection-ru") {

@@ -22,6 +22,8 @@ window.addEventListener(
     }
     if (keyboardEvent.code === "KeyS") {
       sendSelectionCommand("search-selection-google", keyboardEvent);
+    } else if (keyboardEvent.code === "KeyW") {
+      sendSelectionCommand("search-selection-what-is", keyboardEvent);
     } else if (keyboardEvent.code === "KeyE") {
       sendSelectionCommand("search-selection-etymology", keyboardEvent);
     }

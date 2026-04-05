@@ -14,6 +14,11 @@ function openTranslateRu(text) {
   dedupeTab("t:" + text, () => `https://translate.google.com/?sl=auto&tl=ru&text=${encodeURIComponent(text)}`);
 }
 
+function openEtymologySearch(text) {
+  const q = `${text} etymology`;
+  dedupeTab("e:" + text, () => `https://www.google.com/search?q=${encodeURIComponent(q)}`);
+}
+
 async function readSelectedText(tabId) {
   try {
     const [{ result }] = await chrome.scripting.executeScript({
@@ -42,6 +47,7 @@ async function runCommand(command) {
   const text = await readSelectedText(tab.id);
   if (!text) return;
   if (command === "search-selection-google") openSearch(text);
+  else if (command === "search-selection-etymology") openEtymologySearch(text);
   else if (command === "translate-selection-ru") openTranslateRu(text);
 }
 
@@ -50,9 +56,11 @@ chrome.commands.onCommand.addListener((command) => {
 });
 
 chrome.runtime.onMessage.addListener((msg) => {
-  if (msg?.command !== "search-selection-google" || typeof msg.text !== "string") return;
+  if (typeof msg?.text !== "string") return;
   const text = msg.text.trim();
-  if (text) openSearch(text);
+  if (!text) return;
+  if (msg.command === "search-selection-google") openSearch(text);
+  else if (msg.command === "search-selection-etymology") openEtymologySearch(text);
 });
 
 function ensureContextMenus() {
@@ -60,6 +68,11 @@ function ensureContextMenus() {
     chrome.contextMenus.create({
       id: "search-selection-google",
       title: "Search selection in Google",
+      contexts: ["selection"],
+    });
+    chrome.contextMenus.create({
+      id: "search-selection-etymology",
+      title: "Search etymology in Google",
       contexts: ["selection"],
     });
     chrome.contextMenus.create({
@@ -76,5 +89,6 @@ chrome.contextMenus.onClicked.addListener((info) => {
   const text = info.selectionText?.trim();
   if (!text) return;
   if (info.menuItemId === "search-selection-google") openSearch(text);
+  else if (info.menuItemId === "search-selection-etymology") openEtymologySearch(text);
   else if (info.menuItemId === "translate-selection-ru") openTranslateRu(text);
 });

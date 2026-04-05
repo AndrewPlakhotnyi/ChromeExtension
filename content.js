@@ -1,19 +1,29 @@
-function sendSelectionCommand(command, e) {
-  const text = window.getSelection().toString().trim();
-  if (!text) return;
-  e.preventDefault();
-  e.stopImmediatePropagation();
-  chrome.runtime.sendMessage({ command, text }, () => void chrome.runtime.lastError);
+function sendSelectionCommand(commandName, keyboardEvent) {
+  const selectedText = window.getSelection().toString().trim();
+  if (!selectedText) return;
+  keyboardEvent.preventDefault();
+  keyboardEvent.stopImmediatePropagation();
+  chrome.runtime.sendMessage(
+    { command: commandName, text: selectedText },
+    () => void chrome.runtime.lastError
+  );
 }
 
 window.addEventListener(
   "keydown",
-  (e) => {
-    if (!e.altKey || e.shiftKey || e.ctrlKey || e.metaKey) return;
-    if (e.code === "KeyS") {
-      sendSelectionCommand("search-selection-google", e);
-    } else if (e.code === "KeyE") {
-      sendSelectionCommand("search-selection-etymology", e);
+  (keyboardEvent) => {
+    if (
+      !keyboardEvent.altKey ||
+      keyboardEvent.shiftKey ||
+      keyboardEvent.ctrlKey ||
+      keyboardEvent.metaKey
+    ) {
+      return;
+    }
+    if (keyboardEvent.code === "KeyS") {
+      sendSelectionCommand("search-selection-google", keyboardEvent);
+    } else if (keyboardEvent.code === "KeyE") {
+      sendSelectionCommand("search-selection-etymology", keyboardEvent);
     }
   },
   true

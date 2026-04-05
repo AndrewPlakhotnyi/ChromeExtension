@@ -1,66 +1,93 @@
-let lastOpen = { key: "", t: 0 };
-function dedupeTab(key, createUrl) {
+let lastTabOpenDedupe = { dedupeKey: "", timestampMillis: 0 };
+function openTabUnlessDuplicate(dedupeKey, createUrl) {
   const now = Date.now();
-  if (lastOpen.key === key && now - lastOpen.t < 500) return;
-  lastOpen = { key, t: now };
+  if (
+    lastTabOpenDedupe.dedupeKey === dedupeKey &&
+    now - lastTabOpenDedupe.timestampMillis < 500
+  ) {
+    return;
+  }
+  lastTabOpenDedupe = { dedupeKey, timestampMillis: now };
   chrome.tabs.create({ url: createUrl() });
 }
 
-function openSearch(text) {
-  dedupeTab("s:" + text, () => `https://www.google.com/search?q=${encodeURIComponent(text)}`);
+function openGoogleSearchForSelection(selectedText) {
+  openTabUnlessDuplicate(
+    "google-search:" + selectedText,
+    () =>
+      `https://www.google.com/search?q=${encodeURIComponent(selectedText)}`
+  );
 }
 
-function openTranslateRu(text) {
-  dedupeTab("t:" + text, () => `https://translate.google.com/?sl=auto&tl=ru&text=${encodeURIComponent(text)}`);
+function openGoogleTranslateRuForSelection(selectedText) {
+  openTabUnlessDuplicate(
+    "translate-ru:" + selectedText,
+    () =>
+      `https://translate.google.com/?sl=auto&tl=ru&text=${encodeURIComponent(selectedText)}`
+  );
 }
 
-function openEtymologySearch(text) {
-  const q = `${text} etymology`;
-  dedupeTab("e:" + text, () => `https://www.google.com/search?q=${encodeURIComponent(q)}`);
+function openGoogleEtymologySearchForSelection(selectedText) {
+  const googleQuery = `${selectedText} etymology`;
+  openTabUnlessDuplicate(
+    "etymology:" + selectedText,
+    () =>
+      `https://www.google.com/search?q=${encodeURIComponent(googleQuery)}`
+  );
 }
 
-async function readSelectedText(tabId) {
+async function readSelectedTextFromTab(tabId) {
   try {
-    const [{ result }] = await chrome.scripting.executeScript({
+    const [{ result: injectedResult }] = await chrome.scripting.executeScript({
       target: { tabId },
       func: () => window.getSelection().toString(),
     });
-    return (result || "").trim();
+    return (injectedResult || "").trim();
   } catch {
     return "";
   }
 }
 
-async function runCommand(command) {
-  const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
-  if (!tab?.id) return;
-  const u = tab.url || "";
+async function runCommand(commandName) {
+  const [activeTab] = await chrome.tabs.query({
+    active: true,
+    currentWindow: true,
+  });
+  if (!activeTab?.id) return;
+  const tabUrl = activeTab.url || "";
   if (
-    u.startsWith("chrome://") ||
-    u.startsWith("chrome-extension://") ||
-    u.startsWith("edge://") ||
-    u.startsWith("about:")
+    tabUrl.startsWith("chrome://") ||
+    tabUrl.startsWith("chrome-extension://") ||
+    tabUrl.startsWith("edge://") ||
+    tabUrl.startsWith("about:")
   ) {
     return;
   }
 
-  const text = await readSelectedText(tab.id);
-  if (!text) return;
-  if (command === "search-selection-google") openSearch(text);
-  else if (command === "search-selection-etymology") openEtymologySearch(text);
-  else if (command === "translate-selection-ru") openTranslateRu(text);
+  const selectedText = await readSelectedTextFromTab(activeTab.id);
+  if (!selectedText) return;
+  if (commandName === "search-selection-google") {
+    openGoogleSearchForSelection(selectedText);
+  } else if (commandName === "search-selection-etymology") {
+    openGoogleEtymologySearchForSelection(selectedText);
+  } else if (commandName === "translate-selection-ru") {
+    openGoogleTranslateRuForSelection(selectedText);
+  }
 }
 
-chrome.commands.onCommand.addListener((command) => {
-  runCommand(command);
+chrome.commands.onCommand.addListener((commandName) => {
+  runCommand(commandName);
 });
 
-chrome.runtime.onMessage.addListener((msg) => {
-  if (typeof msg?.text !== "string") return;
-  const text = msg.text.trim();
-  if (!text) return;
-  if (msg.command === "search-selection-google") openSearch(text);
-  else if (msg.command === "search-selection-etymology") openEtymologySearch(text);
+chrome.runtime.onMessage.addListener((message) => {
+  if (typeof message?.text !== "string") return;
+  const selectedText = message.text.trim();
+  if (!selectedText) return;
+  if (message.command === "search-selection-google") {
+    openGoogleSearchForSelection(selectedText);
+  } else if (message.command === "search-selection-etymology") {
+    openGoogleEtymologySearchForSelection(selectedText);
+  }
 });
 
 function ensureContextMenus() {
@@ -85,10 +112,14 @@ function ensureContextMenus() {
 
 chrome.runtime.onInstalled.addListener(ensureContextMenus);
 
-chrome.contextMenus.onClicked.addListener((info) => {
-  const text = info.selectionText?.trim();
-  if (!text) return;
-  if (info.menuItemId === "search-selection-google") openSearch(text);
-  else if (info.menuItemId === "search-selection-etymology") openEtymologySearch(text);
-  else if (info.menuItemId === "translate-selection-ru") openTranslateRu(text);
+chrome.contextMenus.onClicked.addListener((contextMenuClickInfo) => {
+  const selectedText = contextMenuClickInfo.selectionText?.trim();
+  if (!selectedText) return;
+  if (contextMenuClickInfo.menuItemId === "search-selection-google") {
+    openGoogleSearchForSelection(selectedText);
+  } else if (contextMenuClickInfo.menuItemId === "search-selection-etymology") {
+    openGoogleEtymologySearchForSelection(selectedText);
+  } else if (contextMenuClickInfo.menuItemId === "translate-selection-ru") {
+    openGoogleTranslateRuForSelection(selectedText);
+  }
 });

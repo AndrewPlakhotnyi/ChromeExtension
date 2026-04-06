@@ -12,21 +12,21 @@
       <section class="toolbar">
         <input id="pdfFileInput" type="file" accept="application/pdf,.pdf" hidden />
         <button id="hamburgerButton" type="button" class="icon-button" title="Toggle side panel">☰</button>
-        <button id="shortcutsHelpButton" type="button" class="icon-button" title="Keyboard shortcuts">⌨</button>
         <button id="openFileButton" type="button" title="Open file">Open</button>
-        <button id="previousBooksButton" type="button" title="Open previous books">Previous</button>
+        <button id="previousBooksButton" type="button" title="Open previous books">Books</button>
         <input id="pdfUrlInput" type="url" placeholder="https://example.com/file.pdf" />
-        <button id="openUrlButton" type="button" title="Open URL">Go</button>
-        <button id="downloadButton" type="button" title="Download" disabled>Save</button>
         <button id="metadataButton" type="button" class="icon-button" title="PDF metadata" disabled>ℹ</button>
         <input id="pageNumberInput" type="number" min="1" value="1" />
         <span id="pageCountLabel">/0</span>
         <button id="zoomOutButton" type="button" disabled>-</button>
         <span id="zoomLabel">100%</span>
         <button id="zoomInButton" type="button" disabled>+</button>
-        <button id="fitWidthButton" type="button" title="Fit width" disabled>Fit</button>
-        <button id="rotateButton" type="button" title="Rotate" disabled>R</button>
+        <button id="shortcutsHelpButton" type="button" class="icon-button" title="Keyboard shortcuts">⌨</button>
         <button id="themeButton" type="button" class="icon-button" title="Toggle theme">☀</button>
+        <div class="book-meta">
+          <span id="bookTitleText" class="book-title">No document loaded</span>
+          <span id="bookPathText" class="book-path-caption">Local file</span>
+        </div>
         <span id="statusText" class="status">No document loaded.</span>
       </section>
 

@@ -8,8 +8,6 @@ const hamburgerButton = document.getElementById("hamburgerButton");
 const openFileButton = document.getElementById("openFileButton");
 const previousBooksButton = document.getElementById("previousBooksButton");
 const pdfUrlInput = document.getElementById("pdfUrlInput");
-const openUrlButton = document.getElementById("openUrlButton");
-const downloadButton = document.getElementById("downloadButton");
 const metadataButton = document.getElementById("metadataButton");
 const contentsTabButton = document.getElementById("contentsTabButton");
 const pagesTabButton = document.getElementById("pagesTabButton");
@@ -19,9 +17,9 @@ const pageCountLabel = document.getElementById("pageCountLabel");
 const zoomOutButton = document.getElementById("zoomOutButton");
 const zoomInButton = document.getElementById("zoomInButton");
 const zoomLabel = document.getElementById("zoomLabel");
-const fitWidthButton = document.getElementById("fitWidthButton");
-const rotateButton = document.getElementById("rotateButton");
 const sidePanel = document.getElementById("sidePanel");
+const bookTitleText = document.getElementById("bookTitleText");
+const bookPathText = document.getElementById("bookPathText");
 const contentsPanel = document.getElementById("contentsPanel");
 const thumbnailsPanel = document.getElementById("thumbnailsPanel");
 const tocList = document.getElementById("tocList");
@@ -56,6 +54,7 @@ const state = {
   localObjectUrl: "",
   sourceName: "document.pdf",
   sourceUrl: "",
+  sourceCaption: "Local file",
   isRenderingAllPages: false,
   pageElements: [],
   hasContents: false,
@@ -93,6 +92,16 @@ async function loadCustomHotkeys() {
 
 function setStatus(message) {
   statusText.textContent = message;
+}
+
+function updateToolbarBookMeta() {
+  const hasDocument = Boolean(state.pdfDocument);
+  bookTitleText.textContent = hasDocument ? state.sourceName || "document.pdf" : "No document loaded";
+  const caption = hasDocument
+    ? state.sourceCaption || state.sourceUrl || "Local file"
+    : "Local file";
+  bookPathText.textContent = caption;
+  bookPathText.title = caption;
 }
 
 function updateThemeButton() {
@@ -144,6 +153,15 @@ function normalizeMetadataValue(value) {
   }
 }
 
+function stringifyMetadataObject(value) {
+  if (value == null) return "—";
+  try {
+    return JSON.stringify(value, null, 2);
+  } catch {
+    return String(value);
+  }
+}
+
 function closeMetadataDialog() {
   if (!metadataOverlay) return;
   metadataOverlay.classList.add("hidden");
@@ -157,17 +175,44 @@ async function readPdfMetadataRows() {
   }
   let metadata = null;
   let info = null;
+  let contentDispositionFilename = "";
+  let permissions = null;
+  let outline = null;
+  let pageLabels = null;
+  let attachments = null;
+  let javaScript = null;
+  let destinations = null;
   try {
     const result = await state.pdfDocument.getMetadata();
     metadata = result?.metadata || null;
     info = result?.info || null;
+    contentDispositionFilename = result?.contentDispositionFilename || "";
   } catch {
     // Keep dialog usable even when metadata extraction fails.
   }
+  try {
+    permissions = await state.pdfDocument.getPermissions();
+  } catch {}
+  try {
+    outline = await state.pdfDocument.getOutline();
+  } catch {}
+  try {
+    pageLabels = await state.pdfDocument.getPageLabels();
+  } catch {}
+  try {
+    attachments = await state.pdfDocument.getAttachments();
+  } catch {}
+  try {
+    javaScript = await state.pdfDocument.getJavaScript();
+  } catch {}
+  try {
+    destinations = await state.pdfDocument.getDestinations();
+  } catch {}
 
   const rows = [
     { label: "File name", value: state.sourceName },
     { label: "Source URL", value: state.sourceUrl || "Local file" },
+    { label: "Content-disposition filename", value: contentDispositionFilename },
     { label: "Pages", value: state.pdfDocument.numPages },
     { label: "Title", value: info?.Title || metadata?.get?.("dc:title") },
     { label: "Author", value: info?.Author || metadata?.get?.("dc:creator") },
@@ -179,7 +224,73 @@ async function readPdfMetadataRows() {
     { label: "Creation date", value: formatPdfDateString(info?.CreationDate) },
     { label: "Modified date", value: formatPdfDateString(info?.ModDate) },
     { label: "Language", value: info?.Lang },
-  ].map((row) => ({ label: row.label, value: normalizeMetadataValue(row.value) }));
+    { label: "Permissions", value: normalizeMetadataValue(permissions) },
+    {
+      label: "Outline entries",
+      value: Array.isArray(outline) ? String(outline.length) : "0",
+    },
+    {
+      label: "Page labels",
+      value: Array.isArray(pageLabels) ? String(pageLabels.length) : "—",
+    },
+    {
+      label: "Attachments",
+      value:
+        attachments && typeof attachments === "object"
+          ? String(Object.keys(attachments).length)
+          : "0",
+    },
+    {
+      label: "Document JavaScript snippets",
+      value: Array.isArray(javaScript) ? String(javaScript.length) : "0",
+    },
+    {
+      label: "Named destinations",
+      value:
+        destinations && typeof destinations === "object"
+          ? String(Object.keys(destinations).length)
+          : "0",
+    },
+    {
+      label: "Info object (raw)",
+      value: stringifyMetadataObject(info),
+      multiline: true,
+    },
+    {
+      label: "XMP metadata object (raw)",
+      value: stringifyMetadataObject(metadata?.getAll?.() || metadata),
+      multiline: true,
+    },
+    {
+      label: "Outline object (raw)",
+      value: stringifyMetadataObject(outline),
+      multiline: true,
+    },
+    {
+      label: "Page labels object (raw)",
+      value: stringifyMetadataObject(pageLabels),
+      multiline: true,
+    },
+    {
+      label: "Attachments object (raw)",
+      value: stringifyMetadataObject(attachments),
+      multiline: true,
+    },
+    {
+      label: "Document JavaScript object (raw)",
+      value: stringifyMetadataObject(javaScript),
+      multiline: true,
+    },
+    {
+      label: "Named destinations object (raw)",
+      value: stringifyMetadataObject(destinations),
+      multiline: true,
+    },
+  ].map((row) => ({
+    label: row.label,
+    value: row.multiline ? row.value : normalizeMetadataValue(row.value),
+    multiline: Boolean(row.multiline),
+  }));
 
   state.metadataCache = rows;
   return rows;
@@ -196,7 +307,7 @@ async function openMetadataDialog() {
     key.className = "metadata-key";
     key.textContent = row.label;
     const value = document.createElement("div");
-    value.className = "metadata-value";
+    value.className = row.multiline ? "metadata-value metadata-value-multiline" : "metadata-value";
     value.textContent = row.value;
     rowElement.appendChild(key);
     rowElement.appendChild(value);
@@ -423,7 +534,12 @@ async function openRecentBookFromDialog(item) {
     const blob = new Blob([localBytes], { type: "application/pdf" });
     revokeLocalObjectUrl();
     state.localObjectUrl = URL.createObjectURL(blob);
-    await loadDocument({ data: localBytes }, item.name || "document.pdf", "");
+    await loadDocument(
+      { data: localBytes },
+      item.name || "document.pdf",
+      "",
+      "From previous books"
+    );
     state.currentBookKey = item.bookKey || "";
     await saveLastSession({
       type: "local",
@@ -537,9 +653,6 @@ function updateControls() {
   pageNumberInput.disabled = !hasDocument;
   zoomInButton.disabled = !hasDocument;
   zoomOutButton.disabled = !hasDocument;
-  fitWidthButton.disabled = !hasDocument;
-  rotateButton.disabled = !hasDocument;
-  downloadButton.disabled = !hasDocument;
   metadataButton.disabled = !hasDocument;
   contentsTabButton.disabled = !hasDocument || !state.hasContents;
   pagesTabButton.disabled = !hasDocument;
@@ -706,6 +819,7 @@ async function closeActiveDocument() {
   revokeLocalObjectUrl();
   state.sourceUrl = "";
   state.sourceName = "document.pdf";
+  state.sourceCaption = "Local file";
   state.currentPageNumber = 1;
   state.scale = 1.1;
   state.rotation = 0;
@@ -739,6 +853,7 @@ async function closeActiveDocument() {
   setPanelMode(null);
   viewerContainer.classList.remove("drag-over");
   updateControls();
+  updateToolbarBookMeta();
 }
 
 async function resolveOutlineDestinationToPageNumber(destination) {
@@ -1208,7 +1323,7 @@ async function renderAllPages() {
   }
 }
 
-async function loadDocument(taskOptions, sourceName, sourceUrl) {
+async function loadDocument(taskOptions, sourceName, sourceUrl, sourceCaption) {
   try {
     await closeActiveDocument();
     setStatus("Loading PDF...");
@@ -1219,6 +1334,8 @@ async function loadDocument(taskOptions, sourceName, sourceUrl) {
     state.rotation = 0;
     state.sourceName = sourceName || "document.pdf";
     state.sourceUrl = sourceUrl || "";
+    state.sourceCaption = sourceCaption || sourceUrl || "Local file";
+    updateToolbarBookMeta();
     updateControls();
     await renderContents();
     await renderAllPages();
@@ -1283,7 +1400,8 @@ async function openPdfFromFile(file) {
   const bytes = new Uint8Array(await file.arrayBuffer());
   revokeLocalObjectUrl();
   state.localObjectUrl = URL.createObjectURL(file);
-  await loadDocument({ data: bytes }, file.name, "");
+  const localCaption = file.path || file.webkitRelativePath || pdfFileInput.value || file.name;
+  await loadDocument({ data: bytes }, file.name, "", localCaption);
   const previewDataUrl = await renderBookPreviewFromCurrentDocument();
   const bookKey = createLocalBookKey(file);
   state.currentBookKey = bookKey;
@@ -1315,7 +1433,7 @@ async function openPdfFromUrl(rawValue) {
       return;
     }
     const url = parsed.toString();
-    await loadDocument({ url }, parsed.pathname.split("/").pop() || "document.pdf", url);
+    await loadDocument({ url }, parsed.pathname.split("/").pop() || "document.pdf", url, url);
     const previewDataUrl = await renderBookPreviewFromCurrentDocument();
     const bookKey = createUrlBookKey(url);
     state.currentBookKey = bookKey;
@@ -1350,7 +1468,8 @@ async function restoreLastSessionIfAny() {
       await loadDocument(
         { data: bytes },
         lastSession.name || "document.pdf",
-        ""
+        "",
+        "Restored local file"
       );
       state.currentBookKey = "";
       setStatus(`Restored: ${lastSession.name || "document.pdf"}`);
@@ -1463,23 +1582,6 @@ async function setScale(nextScale, keepPageAligned = true) {
   scheduleViewStatePersist();
 }
 
-async function fitToWidth() {
-  if (!state.pdfDocument) return;
-  const page = await state.pdfDocument.getPage(1);
-  const viewport = page.getViewport({ scale: 1, rotation: state.rotation });
-  const availableWidth = Math.max(320, viewerContainer.clientWidth - 32);
-  await setScale(availableWidth / viewport.width);
-}
-
-function triggerDownload() {
-  if (!state.pdfDocument) return;
-  const anchor = document.createElement("a");
-  anchor.download = state.sourceName || "document.pdf";
-  anchor.href = state.localObjectUrl || state.sourceUrl;
-  if (!anchor.href) return;
-  anchor.click();
-}
-
 openFileButton.addEventListener("click", () => pdfFileInput.click());
 previousBooksButton.addEventListener("click", () => {
   openPreviousBooksDialog();
@@ -1487,10 +1589,6 @@ previousBooksButton.addEventListener("click", () => {
 pdfFileInput.addEventListener("change", async (event) => {
   const file = event.target.files?.[0];
   await openPdfFromFile(file);
-});
-
-openUrlButton.addEventListener("click", async () => {
-  await openPdfFromUrl(pdfUrlInput.value);
 });
 
 pdfUrlInput.addEventListener("keydown", async (event) => {
@@ -1511,17 +1609,18 @@ pageNumberInput.addEventListener("keydown", async (event) => {
   await commitPageNumberInput();
   pageNumberInput.blur();
 });
+pageNumberInput.addEventListener(
+  "wheel",
+  (event) => {
+    if (document.activeElement === pageNumberInput) {
+      pageNumberInput.blur();
+    }
+    event.preventDefault();
+  },
+  { passive: false }
+);
 zoomOutButton.addEventListener("click", async () => setScale(state.scale - 0.1));
 zoomInButton.addEventListener("click", async () => setScale(state.scale + 0.1));
-fitWidthButton.addEventListener("click", async () => fitToWidth());
-rotateButton.addEventListener("click", async () => {
-  state.rotation = (state.rotation + 90) % 360;
-  await renderAllPages();
-  await renderThumbnails();
-  scrollToPage(state.currentPageNumber);
-  scheduleViewStatePersist();
-});
-downloadButton.addEventListener("click", triggerDownload);
 contentsTabButton.addEventListener("click", () => {
   if (!state.hasContents) return;
   state.panelVisible = true;

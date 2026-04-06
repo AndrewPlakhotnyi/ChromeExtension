@@ -32,8 +32,17 @@
       </section>
 
       <section class="viewer-layout">
-        <aside id="sidePanel" class="side-panel">
+        <aside id="sidePanel" class="side-panel hidden">
           <div class="panel-tabs">
+            <button
+              id="sidePanelToggleButton"
+              class="panel-side-toggle icon-button"
+              type="button"
+              title="Collapse side panel"
+              aria-label="Collapse side panel"
+            >
+              ☰
+            </button>
             <button id="contentsTabButton" class="panel-tab active" type="button">
               <span class="panel-tab-icon" aria-hidden="true">☷</span>
               <span>Contents</span>

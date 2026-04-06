@@ -4,12 +4,17 @@ import { getCustomHotkeys, isHotkeyMatch, mountShortcutsUi } from "./shortcuts-u
 pdfjsLib.GlobalWorkerOptions.workerSrc = chrome.runtime.getURL("vendor/pdfjs/pdf.worker.min.mjs");
 
 const pdfFileInput = document.getElementById("pdfFileInput");
+const toolbar = document.querySelector(".toolbar");
+const toolbarLeft = document.querySelector(".toolbar-left");
+const toolbarRight = document.querySelector(".toolbar-right");
+const toolbarBookMeta = document.querySelector(".toolbar-book-meta");
 const hamburgerButton = document.getElementById("hamburgerButton");
 const openFileButton = document.getElementById("openFileButton");
 const previousBooksButton = document.getElementById("previousBooksButton");
 const metadataButton = document.getElementById("metadataButton");
 const contentsTabButton = document.getElementById("contentsTabButton");
 const pagesTabButton = document.getElementById("pagesTabButton");
+const sidePanelToggleButton = document.getElementById("sidePanelToggleButton");
 const themeButton = document.getElementById("themeButton");
 const pageNumberInput = document.getElementById("pageNumberInput");
 const pageCountLabel = document.getElementById("pageCountLabel");
@@ -91,6 +96,22 @@ function setStatus(message) {
   statusText.textContent = message;
 }
 
+function updateToolbarBookMetaLayout() {
+  if (!toolbar || !toolbarBookMeta) return;
+  const toolbarRect = toolbar.getBoundingClientRect();
+  if (toolbarRect.width <= 0) return;
+  const leftEdge = toolbarLeft
+    ? toolbarLeft.getBoundingClientRect().right - toolbarRect.left + 8
+    : 0;
+  const rightEdge = toolbarRight
+    ? toolbarRect.right - toolbarRight.getBoundingClientRect().left + 8
+    : 0;
+  const halfWidth = toolbarRect.width / 2;
+  const maxHalf = Math.min(halfWidth - leftEdge, halfWidth - rightEdge);
+  const safeWidth = Math.max(0, Math.floor(maxHalf * 2));
+  toolbarBookMeta.style.width = `${safeWidth}px`;
+}
+
 function updateToolbarBookMeta() {
   if (bookTitleText) {
     const title = String(state.sourceName || "").trim();
@@ -100,6 +121,7 @@ function updateToolbarBookMeta() {
     const caption = String(state.sourceCaption || "").trim();
     bookPathCaption.textContent = caption || "Local file";
   }
+  updateToolbarBookMetaLayout();
 }
 
 function updateThemeButton() {
@@ -669,7 +691,23 @@ function updateControls() {
   updateToolbarBookMeta();
 }
 
-function highlightActiveTocEntry() {
+function isElementVerticallyVisibleInContainer(container, element) {
+  if (!container || !element) return false;
+  const containerRect = container.getBoundingClientRect();
+  const elementRect = element.getBoundingClientRect();
+  return elementRect.top >= containerRect.top && elementRect.bottom <= containerRect.bottom;
+}
+
+function ensureActiveTocEntryVisible(button) {
+  if (!button || !contentsPanel || contentsPanel.classList.contains("hidden")) return;
+  const target = button.closest(".toc-item-row") || button;
+  if (!contentsPanel.contains(target)) return;
+  if (isElementVerticallyVisibleInContainer(contentsPanel, target)) return;
+  target.scrollIntoView({ block: "nearest", inline: "nearest", behavior: "auto" });
+}
+
+function highlightActiveTocEntry(options = {}) {
+  const ensureVisible = options.ensureVisible === true;
   const entries = state.tocPageEntries;
   if (!entries.length) {
     if (state.activeTocButton) {
@@ -694,6 +732,9 @@ function highlightActiveTocEntry() {
   }
   activeEntry.button.classList.add("active");
   state.activeTocButton = activeEntry.button;
+  if (ensureVisible) {
+    ensureActiveTocEntryVisible(activeEntry.button);
+  }
 }
 
 function collapseAllTocSections() {
@@ -706,6 +747,23 @@ function collapseAllTocSections() {
     toggle.textContent = "+";
     toggle.setAttribute("aria-expanded", "false");
   }
+}
+
+function toggleSidePanelVisibility() {
+  const hasPanelMode = state.panelMode === "contents" || state.panelMode === "pages";
+  if (!hasPanelMode) {
+    if (state.hasContents) {
+      state.panelVisible = true;
+      setPanelMode("contents");
+    } else if (state.pdfDocument) {
+      state.panelVisible = true;
+      setPanelMode("pages");
+    }
+    return;
+  }
+  state.panelVisible = !state.panelVisible;
+  syncPanelLayout();
+  scheduleViewStatePersist();
 }
 
 function normalizeTocSearchQuery(query) {
@@ -802,13 +860,21 @@ function revokeLocalObjectUrl() {
   }
 }
 
+function syncPanelLayout() {
+  const isOpenMode = state.panelMode === "contents" || state.panelMode === "pages";
+  const isPanelShown = isOpenMode && state.panelVisible;
+  sidePanel.classList.toggle("hidden", !isPanelShown);
+  document.body.classList.toggle("panel-open", isPanelShown);
+  updateToolbarBookMetaLayout();
+}
+
 function setPanelMode(mode) {
   state.panelMode = mode;
   const isOpen = mode === "contents" || mode === "pages";
   if (!isOpen) {
     state.panelVisible = false;
   }
-  sidePanel.classList.toggle("hidden", !isOpen || !state.panelVisible);
+  syncPanelLayout();
   contentsPanel.classList.toggle("hidden", mode !== "contents");
   thumbnailsPanel.classList.toggle("hidden", mode !== "pages");
   contentsTabButton.classList.toggle("active", mode === "contents");
@@ -929,7 +995,15 @@ function tocPreviewPaletteVars(title, pageNumber) {
   return palettes[u % palettes.length];
 }
 
-function renderOutlineNodes(parentList, nodes, pageEntries = []) {
+function formatTocPageText(pageNumber, pageLabels) {
+  if (!Number.isFinite(pageNumber)) return "";
+  const numericPage = Math.max(1, Math.floor(pageNumber));
+  const label = Array.isArray(pageLabels) ? pageLabels[numericPage - 1] : "";
+  const normalizedLabel = typeof label === "string" ? label.trim() : "";
+  return normalizedLabel ? `${normalizedLabel} (${numericPage})` : String(numericPage);
+}
+
+function renderOutlineNodes(parentList, nodes, pageEntries = [], pageLabels = []) {
   for (const item of nodes) {
     const hasChildren = item.children.length > 0;
     const previewPage = inferOutlinePreviewPage(item);
@@ -965,7 +1039,10 @@ function renderOutlineNodes(parentList, nodes, pageEntries = []) {
 
     const pageSpan = document.createElement("span");
     pageSpan.className = "toc-item-page";
-    pageSpan.textContent = typeof item.pageNumber === "number" ? String(item.pageNumber) : "";
+    pageSpan.textContent =
+      typeof item.pageNumber === "number"
+        ? formatTocPageText(item.pageNumber, pageLabels)
+        : "";
 
     if (showPreview) {
       const palette = tocPreviewPaletteVars(item.title, previewPage);
@@ -1000,7 +1077,7 @@ function renderOutlineNodes(parentList, nodes, pageEntries = []) {
 
       childList = document.createElement("ul");
       childList.className = "toc-sublist";
-      renderOutlineNodes(childList, item.children, pageEntries);
+      renderOutlineNodes(childList, item.children, pageEntries, pageLabels);
 
       toggleButton.addEventListener("click", () => {
         const isCollapsed = childList.classList.toggle("collapsed");
@@ -1037,6 +1114,12 @@ async function renderContents() {
   }
 
   const outline = await state.pdfDocument.getOutline();
+  let pageLabels = [];
+  try {
+    pageLabels = (await state.pdfDocument.getPageLabels()) || [];
+  } catch {
+    pageLabels = [];
+  }
   const mappedOutline = await mapOutlineItems(outline);
   if (!mappedOutline.length) {
     if (state.panelMode === "contents") {
@@ -1047,7 +1130,7 @@ async function renderContents() {
   }
 
   const pageEntries = [];
-  renderOutlineNodes(tocList, mappedOutline, pageEntries);
+  renderOutlineNodes(tocList, mappedOutline, pageEntries, pageLabels);
   state.tocPageEntries = pageEntries.sort((a, b) => a.pageNumber - b.pageNumber);
 
   state.hasContents = true;
@@ -1374,7 +1457,7 @@ async function loadDocument(taskOptions, sourceName, sourceUrl, sourceCaption) {
             : "pages";
       setPanelMode(preferredPanelMode);
       state.panelVisible = view.panelVisible !== false;
-      sidePanel.classList.toggle("hidden", !state.panelVisible);
+      syncPanelLayout();
 
       if (Number.isFinite(Number(view.pageNumber))) {
         await setPage(Number(view.pageNumber), false);
@@ -1550,7 +1633,7 @@ async function setPage(pageNumber, shouldScroll = true, immediate = false) {
   state.currentPageNumber = targetPage;
   updateControls();
   highlightActiveThumbnail();
-  highlightActiveTocEntry();
+  highlightActiveTocEntry({ ensureVisible: shouldScroll });
   requestRenderAround(targetPage);
   scheduleViewStatePersist();
   updateCurrentBookProgress();
@@ -1632,22 +1715,9 @@ collapseAllTocButton.addEventListener("click", () => {
 tocSearchInput.addEventListener("input", () => {
   filterTocItemsByQuery(tocSearchInput.value);
 });
-hamburgerButton.addEventListener("click", () => {
-  const hasPanelMode = state.panelMode === "contents" || state.panelMode === "pages";
-  if (!hasPanelMode) {
-    if (state.hasContents) {
-      state.panelVisible = true;
-      setPanelMode("contents");
-    } else if (state.pdfDocument) {
-      state.panelVisible = true;
-      setPanelMode("pages");
-    }
-    return;
-  }
-  state.panelVisible = !state.panelVisible;
-  sidePanel.classList.toggle("hidden", !state.panelVisible);
-  scheduleViewStatePersist();
-});
+hamburgerButton.addEventListener("click", toggleSidePanelVisibility);
+sidePanelToggleButton?.addEventListener("click", toggleSidePanelVisibility);
+window.addEventListener("resize", updateToolbarBookMetaLayout);
 
 themeButton.addEventListener("click", () => {
   const isDark = document.body.classList.contains("dark");

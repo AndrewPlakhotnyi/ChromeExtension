@@ -64,7 +64,9 @@ const state = {
   panelVisible: true,
   pendingViewState: null,
   customHotkeys: {
+    viewerPreviousPlace: "Ctrl+Alt+A",
     viewerWhatIs: "Ctrl+Alt+W",
+    viewerEtymology: "Ctrl+Alt+E",
     viewerTranslateRu: "Ctrl+Alt+T",
   },
   pageRenderObserver: null,
@@ -79,6 +81,8 @@ const state = {
   activeTocButton: null,
   currentBookKey: "",
   metadataCache: null,
+  navigationHistory: [],
+  suppressNavigationHistory: false,
 };
 
 let viewStatePersistTimer = null;
@@ -94,6 +98,47 @@ async function loadCustomHotkeys() {
 
 function setStatus(message) {
   statusText.textContent = message;
+}
+
+function rememberCurrentPlaceForBackNavigation(nextPageNumber, shouldScroll) {
+  if (!shouldScroll || state.suppressNavigationHistory || !state.pdfDocument) return;
+  const currentPage = Number(state.currentPageNumber);
+  const targetPage = Number(nextPageNumber);
+  if (!Number.isFinite(currentPage) || !Number.isFinite(targetPage) || currentPage === targetPage) return;
+  const entry = {
+    pageNumber: currentPage,
+    scrollTop: Number(viewerContainer?.scrollTop || 0),
+  };
+  const last = state.navigationHistory[state.navigationHistory.length - 1];
+  if (
+    last &&
+    last.pageNumber === entry.pageNumber &&
+    Math.abs((last.scrollTop || 0) - entry.scrollTop) < 2
+  ) {
+    return;
+  }
+  state.navigationHistory.push(entry);
+  if (state.navigationHistory.length > 200) {
+    state.navigationHistory.shift();
+  }
+}
+
+async function goToPreviousPlace() {
+  if (!state.pdfDocument || !state.navigationHistory.length) return;
+  const previous = state.navigationHistory.pop();
+  if (!previous || !Number.isFinite(Number(previous.pageNumber))) return;
+  state.suppressNavigationHistory = true;
+  try {
+    await setPage(Number(previous.pageNumber), false, true);
+    viewerContainer.scrollTop = Math.max(0, Number(previous.scrollTop) || 0);
+  } finally {
+    state.suppressNavigationHistory = false;
+  }
+}
+
+function updateDocumentTitle() {
+  const title = String(state.sourceName || "").trim();
+  document.title = title || "PDF Viewer";
 }
 
 function updateToolbarBookMetaLayout() {
@@ -688,6 +733,7 @@ function updateControls() {
   pageNumberInput.value = String(state.currentPageNumber || 1);
   pageCountLabel.textContent = `/${pageCount}`;
   zoomLabel.textContent = `${Math.round(state.scale * 100)}%`;
+  updateDocumentTitle();
   updateToolbarBookMeta();
 }
 
@@ -913,6 +959,8 @@ async function closeActiveDocument() {
   state.activeTocButton = null;
   state.currentBookKey = "";
   state.metadataCache = null;
+  state.navigationHistory = [];
+  state.suppressNavigationHistory = false;
   closeMetadataDialog();
   state.panelMode = null;
   state.panelVisible = true;
@@ -1630,6 +1678,7 @@ async function setPage(pageNumber, shouldScroll = true, immediate = false) {
   const parsed = Number(pageNumber);
   if (!Number.isFinite(parsed)) return;
   const targetPage = Math.min(Math.max(1, Math.floor(parsed)), state.pdfDocument.numPages);
+  rememberCurrentPlaceForBackNavigation(targetPage, shouldScroll);
   state.currentPageNumber = targetPage;
   updateControls();
   highlightActiveThumbnail();
@@ -1887,11 +1936,25 @@ function initMetadataDialog() {
 
 window.addEventListener("keydown", async (event) => {
   if (isEditableTarget(event.target)) return;
+  if (isHotkeyMatch(event, state.customHotkeys.viewerPreviousPlace)) {
+    event.preventDefault();
+    await goToPreviousPlace();
+    return;
+  }
   if (isHotkeyMatch(event, state.customHotkeys.viewerWhatIs)) {
     event.preventDefault();
     const selectedText = window.getSelection().toString().trim();
     if (selectedText) {
       const query = encodeURIComponent(`What is ${selectedText}`);
+      chrome.tabs.create({ url: `https://www.google.com/search?q=${query}` });
+    }
+    return;
+  }
+  if (isHotkeyMatch(event, state.customHotkeys.viewerEtymology)) {
+    event.preventDefault();
+    const selectedText = window.getSelection().toString().trim();
+    if (selectedText) {
+      const query = encodeURIComponent(`${selectedText} etymology`);
       chrome.tabs.create({ url: `https://www.google.com/search?q=${query}` });
     }
     return;

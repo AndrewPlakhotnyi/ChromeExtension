@@ -1,7 +1,9 @@
 const CUSTOM_HOTKEYS_KEY = "customViewerHotkeys";
 
 const DEFAULT_CUSTOM_HOTKEYS = {
+  viewerPreviousPlace: "Ctrl+Alt+A",
   viewerWhatIs: "Ctrl+Alt+W",
+  viewerEtymology: "Ctrl+Alt+E",
   viewerTranslateRu: "Ctrl+Alt+T",
 };
 
@@ -71,7 +73,13 @@ export function isHotkeyMatch(event, hotkey) {
 export async function getCustomHotkeys() {
   const stored = await chrome.storage.local.get(CUSTOM_HOTKEYS_KEY);
   return {
+    viewerPreviousPlace:
+      normalizeHotkey(stored[CUSTOM_HOTKEYS_KEY]?.viewerPreviousPlace) ||
+      DEFAULT_CUSTOM_HOTKEYS.viewerPreviousPlace,
     viewerWhatIs: normalizeHotkey(stored[CUSTOM_HOTKEYS_KEY]?.viewerWhatIs) || DEFAULT_CUSTOM_HOTKEYS.viewerWhatIs,
+    viewerEtymology:
+      normalizeHotkey(stored[CUSTOM_HOTKEYS_KEY]?.viewerEtymology) ||
+      DEFAULT_CUSTOM_HOTKEYS.viewerEtymology,
     viewerTranslateRu:
       normalizeHotkey(stored[CUSTOM_HOTKEYS_KEY]?.viewerTranslateRu) ||
       DEFAULT_CUSTOM_HOTKEYS.viewerTranslateRu,
@@ -81,7 +89,13 @@ export async function getCustomHotkeys() {
 export async function saveCustomHotkeys(nextHotkeys) {
   await chrome.storage.local.set({
     [CUSTOM_HOTKEYS_KEY]: {
+      viewerPreviousPlace:
+        normalizeHotkey(nextHotkeys.viewerPreviousPlace) ||
+        DEFAULT_CUSTOM_HOTKEYS.viewerPreviousPlace,
       viewerWhatIs: normalizeHotkey(nextHotkeys.viewerWhatIs) || DEFAULT_CUSTOM_HOTKEYS.viewerWhatIs,
+      viewerEtymology:
+        normalizeHotkey(nextHotkeys.viewerEtymology) ||
+        DEFAULT_CUSTOM_HOTKEYS.viewerEtymology,
       viewerTranslateRu:
         normalizeHotkey(nextHotkeys.viewerTranslateRu) ||
         DEFAULT_CUSTOM_HOTKEYS.viewerTranslateRu,
@@ -166,8 +180,18 @@ export async function mountShortcutsUi(root) {
   const customHotkeys = await getCustomHotkeys();
   const rerenderCustom = async () => {
     const latest = await getCustomHotkeys();
+    customHotkeys.viewerPreviousPlace = latest.viewerPreviousPlace;
     customHotkeys.viewerWhatIs = latest.viewerWhatIs;
+    customHotkeys.viewerEtymology = latest.viewerEtymology;
     customHotkeys.viewerTranslateRu = latest.viewerTranslateRu;
+    const newPreviousPlaceRow = makeEditableHotkeyRow(
+      "Viewer: Go to previous place",
+      "viewerPreviousPlace",
+      customHotkeys,
+      rerenderCustom
+    );
+    previousPlaceRow.replaceWith(newPreviousPlaceRow);
+    previousPlaceRow = newPreviousPlaceRow;
     const newWhatRow = makeEditableHotkeyRow(
       "Viewer: What is selected text",
       "viewerWhatIs",
@@ -176,6 +200,14 @@ export async function mountShortcutsUi(root) {
     );
     whatRow.replaceWith(newWhatRow);
     whatRow = newWhatRow;
+    const newEtymologyRow = makeEditableHotkeyRow(
+      "Viewer: Etymology of selected text",
+      "viewerEtymology",
+      customHotkeys,
+      rerenderCustom
+    );
+    etymologyRow.replaceWith(newEtymologyRow);
+    etymologyRow = newEtymologyRow;
     const newTranslateRow =
       makeEditableHotkeyRow("Viewer: Translate selected text to Russian", "viewerTranslateRu", customHotkeys, rerenderCustom)
     ;
@@ -194,9 +226,21 @@ export async function mountShortcutsUi(root) {
     "These hotkeys are for the extension PDF viewer only and are saved by this extension. They are separate from chrome://extensions/shortcuts.";
   root.appendChild(customNote);
 
+  let previousPlaceRow = makeEditableHotkeyRow(
+    "Viewer: Go to previous place",
+    "viewerPreviousPlace",
+    customHotkeys,
+    rerenderCustom
+  );
   let whatRow = makeEditableHotkeyRow(
     "Viewer: What is selected text",
     "viewerWhatIs",
+    customHotkeys,
+    rerenderCustom
+  );
+  let etymologyRow = makeEditableHotkeyRow(
+    "Viewer: Etymology of selected text",
+    "viewerEtymology",
     customHotkeys,
     rerenderCustom
   );
@@ -206,7 +250,9 @@ export async function mountShortcutsUi(root) {
     customHotkeys,
     rerenderCustom
   );
+  root.appendChild(previousPlaceRow);
   root.appendChild(whatRow);
+  root.appendChild(etymologyRow);
   root.appendChild(translateRow);
 
   const intro = document.createElement("p");

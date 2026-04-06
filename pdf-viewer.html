@@ -11,23 +11,24 @@
     <main class="viewer-app">
       <section class="toolbar">
         <input id="pdfFileInput" type="file" accept="application/pdf,.pdf" hidden />
-        <button id="hamburgerButton" type="button" class="icon-button" title="Toggle side panel">☰</button>
-        <button id="openFileButton" type="button" title="Open file">Open</button>
-        <button id="previousBooksButton" type="button" title="Open previous books">Books</button>
-        <input id="pdfUrlInput" type="url" placeholder="https://example.com/file.pdf" />
-        <button id="metadataButton" type="button" class="icon-button" title="PDF metadata" disabled>ℹ</button>
-        <input id="pageNumberInput" type="number" min="1" value="1" />
-        <span id="pageCountLabel">/0</span>
-        <button id="zoomOutButton" type="button" disabled>-</button>
-        <span id="zoomLabel">100%</span>
-        <button id="zoomInButton" type="button" disabled>+</button>
-        <button id="shortcutsHelpButton" type="button" class="icon-button" title="Keyboard shortcuts">⌨</button>
-        <button id="themeButton" type="button" class="icon-button" title="Toggle theme">☀</button>
-        <div class="book-meta">
-          <span id="bookTitleText" class="book-title">No document loaded</span>
-          <span id="bookPathText" class="book-path-caption">Local file</span>
+        <div class="toolbar-left">
+          <button id="hamburgerButton" type="button" class="icon-button" title="Toggle side panel">☰</button>
+          <button id="openFileButton" type="button" title="Open file">Open</button>
+          <button id="previousBooksButton" type="button" title="Open previous books">Books</button>
         </div>
-        <span id="statusText" class="status">No document loaded.</span>
+        <div class="toolbar-right">
+          <button id="metadataButton" type="button" class="icon-button" title="PDF metadata" disabled>ℹ</button>
+          <input id="pageNumberInput" type="number" min="1" value="1" />
+          <span id="pageCountLabel">/0</span>
+          <span id="zoomLabel">100%</span>
+          <button id="shortcutsHelpButton" type="button" class="icon-button" title="Keyboard shortcuts">⌨</button>
+          <button id="themeButton" type="button" class="icon-button" title="Toggle theme">☀</button>
+          <span id="statusText" class="status"></span>
+        </div>
+        <div class="toolbar-book-meta" aria-live="polite">
+          <div id="bookTitleText" class="book-title"></div>
+          <div id="bookPathCaption" class="book-path-caption">Local file</div>
+        </div>
       </section>
 
       <section class="viewer-layout">

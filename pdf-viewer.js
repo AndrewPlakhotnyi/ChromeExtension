@@ -7,19 +7,16 @@ const pdfFileInput = document.getElementById("pdfFileInput");
 const hamburgerButton = document.getElementById("hamburgerButton");
 const openFileButton = document.getElementById("openFileButton");
 const previousBooksButton = document.getElementById("previousBooksButton");
-const pdfUrlInput = document.getElementById("pdfUrlInput");
 const metadataButton = document.getElementById("metadataButton");
 const contentsTabButton = document.getElementById("contentsTabButton");
 const pagesTabButton = document.getElementById("pagesTabButton");
 const themeButton = document.getElementById("themeButton");
 const pageNumberInput = document.getElementById("pageNumberInput");
 const pageCountLabel = document.getElementById("pageCountLabel");
-const zoomOutButton = document.getElementById("zoomOutButton");
-const zoomInButton = document.getElementById("zoomInButton");
 const zoomLabel = document.getElementById("zoomLabel");
-const sidePanel = document.getElementById("sidePanel");
 const bookTitleText = document.getElementById("bookTitleText");
-const bookPathText = document.getElementById("bookPathText");
+const bookPathCaption = document.getElementById("bookPathCaption");
+const sidePanel = document.getElementById("sidePanel");
 const contentsPanel = document.getElementById("contentsPanel");
 const thumbnailsPanel = document.getElementById("thumbnailsPanel");
 const tocList = document.getElementById("tocList");
@@ -95,13 +92,14 @@ function setStatus(message) {
 }
 
 function updateToolbarBookMeta() {
-  const hasDocument = Boolean(state.pdfDocument);
-  bookTitleText.textContent = hasDocument ? state.sourceName || "document.pdf" : "No document loaded";
-  const caption = hasDocument
-    ? state.sourceCaption || state.sourceUrl || "Local file"
-    : "Local file";
-  bookPathText.textContent = caption;
-  bookPathText.title = caption;
+  if (bookTitleText) {
+    const title = String(state.sourceName || "").trim();
+    bookTitleText.textContent = title;
+  }
+  if (bookPathCaption) {
+    const caption = String(state.sourceCaption || "").trim();
+    bookPathCaption.textContent = caption || "Local file";
+  }
 }
 
 function updateThemeButton() {
@@ -117,6 +115,15 @@ function normalizeUrlInput(rawValue) {
   const value = rawValue.trim();
   if (!value) return "";
   return /^https?:\/\//i.test(value) ? value : `https://${value}`;
+}
+
+function sanitizePathCaption(caption, fallbackName = "") {
+  const text = String(caption || "").trim();
+  if (!text) return fallbackName || "Local file";
+  const withoutFakePath = text.replace(/^(?:[a-z]:)?[\\/]*fakepath[\\/]/i, "");
+  const normalized = withoutFakePath.trim();
+  if (!normalized) return fallbackName || "Local file";
+  return normalized;
 }
 
 function formatPdfDateString(value) {
@@ -553,7 +560,6 @@ async function openRecentBookFromDialog(item) {
     return;
   }
   if (item.type === "url" && typeof item.url === "string") {
-    pdfUrlInput.value = item.url;
     await loadDocument(
       { url: item.url },
       item.name || item.url.split("/").pop() || "document.pdf",
@@ -651,8 +657,6 @@ function updateControls() {
   const pageCount = hasDocument ? state.pdfDocument.numPages : 0;
 
   pageNumberInput.disabled = !hasDocument;
-  zoomInButton.disabled = !hasDocument;
-  zoomOutButton.disabled = !hasDocument;
   metadataButton.disabled = !hasDocument;
   contentsTabButton.disabled = !hasDocument || !state.hasContents;
   pagesTabButton.disabled = !hasDocument;
@@ -662,6 +666,7 @@ function updateControls() {
   pageNumberInput.value = String(state.currentPageNumber || 1);
   pageCountLabel.textContent = `/${pageCount}`;
   zoomLabel.textContent = `${Math.round(state.scale * 100)}%`;
+  updateToolbarBookMeta();
 }
 
 function highlightActiveTocEntry() {
@@ -853,7 +858,6 @@ async function closeActiveDocument() {
   setPanelMode(null);
   viewerContainer.classList.remove("drag-over");
   updateControls();
-  updateToolbarBookMeta();
 }
 
 async function resolveOutlineDestinationToPageNumber(destination) {
@@ -1314,7 +1318,6 @@ async function renderAllPages() {
     }
 
     requestRenderAround(state.currentPageNumber || 1);
-    setStatus(`Loaded ${pageCount} pages (lazy render enabled)`);
     updateControls();
   } catch (error) {
     setStatus(`Render failed: ${String(error)}`);
@@ -1326,7 +1329,6 @@ async function renderAllPages() {
 async function loadDocument(taskOptions, sourceName, sourceUrl, sourceCaption) {
   try {
     await closeActiveDocument();
-    setStatus("Loading PDF...");
     const loadingTask = pdfjsLib.getDocument(taskOptions);
     state.pdfDocument = await loadingTask.promise;
     state.currentPageNumber = 1;
@@ -1334,8 +1336,7 @@ async function loadDocument(taskOptions, sourceName, sourceUrl, sourceCaption) {
     state.rotation = 0;
     state.sourceName = sourceName || "document.pdf";
     state.sourceUrl = sourceUrl || "";
-    state.sourceCaption = sourceCaption || sourceUrl || "Local file";
-    updateToolbarBookMeta();
+    state.sourceCaption = sanitizePathCaption(sourceCaption || sourceUrl || "Local file", sourceName);
     updateControls();
     await renderContents();
     await renderAllPages();
@@ -1400,7 +1401,10 @@ async function openPdfFromFile(file) {
   const bytes = new Uint8Array(await file.arrayBuffer());
   revokeLocalObjectUrl();
   state.localObjectUrl = URL.createObjectURL(file);
-  const localCaption = file.path || file.webkitRelativePath || pdfFileInput.value || file.name;
+  const localCaption = sanitizePathCaption(
+    file.path || file.webkitRelativePath || pdfFileInput.value || file.name,
+    file.name
+  );
   await loadDocument({ data: bytes }, file.name, "", localCaption);
   const previewDataUrl = await renderBookPreviewFromCurrentDocument();
   const bookKey = createLocalBookKey(file);
@@ -1480,7 +1484,6 @@ async function restoreLastSessionIfAny() {
   }
 
   if (lastSession.type === "url" && typeof lastSession.url === "string") {
-    pdfUrlInput.value = lastSession.url;
     await openPdfFromUrl(lastSession.url);
   }
 }
@@ -1591,13 +1594,6 @@ pdfFileInput.addEventListener("change", async (event) => {
   await openPdfFromFile(file);
 });
 
-pdfUrlInput.addEventListener("keydown", async (event) => {
-  if (event.key === "Enter") {
-    event.preventDefault();
-    await openPdfFromUrl(pdfUrlInput.value);
-  }
-});
-
 async function commitPageNumberInput() {
   await setPage(pageNumberInput.value, true, true);
 }
@@ -1619,8 +1615,6 @@ pageNumberInput.addEventListener(
   },
   { passive: false }
 );
-zoomOutButton.addEventListener("click", async () => setScale(state.scale - 0.1));
-zoomInButton.addEventListener("click", async () => setScale(state.scale + 0.1));
 contentsTabButton.addEventListener("click", () => {
   if (!state.hasContents) return;
   state.panelVisible = true;

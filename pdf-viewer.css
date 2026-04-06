@@ -36,6 +36,52 @@ body {
   z-index: 5;
 }
 
+.toolbar-left,
+.toolbar-right {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  min-width: 0;
+}
+
+.toolbar-right {
+  margin-left: auto;
+}
+
+.toolbar-book-meta {
+  position: absolute;
+  left: 50%;
+  transform: translateX(-50%);
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 1px;
+  max-width: min(52vw, 640px);
+  pointer-events: none;
+}
+
+.book-title {
+  font-size: 12px;
+  line-height: 1.1;
+  font-weight: 600;
+  color: #e8e8e8;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  max-width: 100%;
+}
+
+.book-path-caption {
+  font-size: 10px;
+  line-height: 1.1;
+  color: #878787;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  max-width: 100%;
+}
+
 button,
 input {
   border-radius: 2px;
@@ -58,8 +104,6 @@ input {
   height: 26px;
 }
 
-#zoomOutButton,
-#zoomInButton,
 #themeButton,
 #shortcutsHelpButton,
 #hamburgerButton {
@@ -75,12 +119,6 @@ input {
 button:disabled {
   opacity: 0.55;
   cursor: not-allowed;
-}
-
-#pdfUrlInput {
-  flex: 1;
-  min-width: 220px;
-  padding: 3px 6px;
 }
 
 #pageNumberInput {
@@ -103,6 +141,22 @@ button:disabled {
   font-size: 12px;
 }
 
+#zoomLabel {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 4px;
+}
+
+#zoomLabel::before {
+  content: "⌕";
+  font-size: 12px;
+  line-height: 1;
+  opacity: 0.85;
+  color: currentColor;
+  font-family: "Segoe UI Symbol", "Segoe UI", Arial, sans-serif;
+}
+
 .drop-zone {
   border: 2px dashed #94a9db;
   border-radius: 6px;
@@ -114,46 +168,12 @@ button:disabled {
 }
 
 .status {
-  margin-left: 8px;
   font-size: 11px;
   color: #b8b8b8;
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
   max-width: 220px;
-}
-
-.book-meta {
-  margin-left: auto;
-  min-width: 140px;
-  max-width: 360px;
-  display: flex;
-  flex-direction: column;
-  align-items: flex-end;
-  gap: 1px;
-}
-
-.book-title {
-  font-size: 11px;
-  font-weight: 600;
-  color: #d9d9d9;
-  line-height: 1.15;
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  width: 100%;
-  text-align: right;
-}
-
-.book-path-caption {
-  font-size: 10px;
-  color: #9a9a9a;
-  line-height: 1.1;
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  width: 100%;
-  text-align: right;
 }
 
 .viewer-container {

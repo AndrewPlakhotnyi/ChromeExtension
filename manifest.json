@@ -36,11 +36,13 @@
     }
   ],
   "commands": {
-    "search-selection-google": {
+    "_execute_action": {
       "suggested_key": {
-        "default": "Alt+Shift+S",
-        "mac": "Alt+Shift+S"
-      },
+        "default": "Alt+Shift+A",
+        "mac": "Alt+Shift+A"
+      }
+    },
+    "search-selection-google": {
       "description": "Search selected text in Google"
     },
     "search-selection-what-is": {
@@ -66,6 +68,9 @@
     },
     "close-tabs-to-the-right": {
       "description": "Close tabs to the right of the current tab"
+    },
+    "select-previous-tab": {
+      "description": "Select previous tab"
     }
   }
 }

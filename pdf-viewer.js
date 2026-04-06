@@ -6,6 +6,7 @@ pdfjsLib.GlobalWorkerOptions.workerSrc = chrome.runtime.getURL("vendor/pdfjs/pdf
 const pdfFileInput = document.getElementById("pdfFileInput");
 const hamburgerButton = document.getElementById("hamburgerButton");
 const openFileButton = document.getElementById("openFileButton");
+const previousBooksButton = document.getElementById("previousBooksButton");
 const pdfUrlInput = document.getElementById("pdfUrlInput");
 const openUrlButton = document.getElementById("openUrlButton");
 const downloadButton = document.getElementById("downloadButton");
@@ -24,16 +25,23 @@ const contentsPanel = document.getElementById("contentsPanel");
 const thumbnailsPanel = document.getElementById("thumbnailsPanel");
 const tocList = document.getElementById("tocList");
 const tocEmpty = document.getElementById("tocEmpty");
+const collapseAllTocButton = document.getElementById("collapseAllTocButton");
 const thumbsList = document.getElementById("thumbsList");
 const thumbsEmpty = document.getElementById("thumbsEmpty");
 const viewerContainer = document.getElementById("viewerContainer");
 const pagesContainer = document.getElementById("pagesContainer");
 const statusText = document.getElementById("statusText");
+const previousBooksOverlay = document.getElementById("previousBooksOverlay");
+const previousBooksList = document.getElementById("previousBooksList");
+const previousBooksEmpty = document.getElementById("previousBooksEmpty");
+const previousBooksCloseButton = document.getElementById("previousBooksCloseButton");
 
 const LAST_SESSION_DB_NAME = "pdf-viewer-cache";
 const LAST_SESSION_STORE_NAME = "kv";
 const LAST_SESSION_KEY = "last-session";
 const LAST_VIEW_KEY = "last-view";
+const RECENT_BOOKS_KEY = "recent-books";
+const MAX_RECENT_BOOKS = 16;
 
 const state = {
   pdfDocument: null,
@@ -63,6 +71,7 @@ const state = {
   suppressScrollSync: false,
   tocPageEntries: [],
   activeTocButton: null,
+  currentBookKey: "",
 };
 
 let viewStatePersistTimer = null;
@@ -85,10 +94,23 @@ function updateThemeButton() {
   themeButton.textContent = isDark ? "☀" : "☾";
 }
 
+function nowMillis() {
+  return Date.now();
+}
+
 function normalizeUrlInput(rawValue) {
   const value = rawValue.trim();
   if (!value) return "";
   return /^https?:\/\//i.test(value) ? value : `https://${value}`;
+}
+
+function isEditableTarget(target) {
+  if (!target) return false;
+  if (target instanceof HTMLInputElement) return true;
+  if (target instanceof HTMLTextAreaElement) return true;
+  if (target instanceof HTMLSelectElement) return true;
+  if (target instanceof HTMLElement && target.isContentEditable) return true;
+  return false;
 }
 
 function openLastSessionDb() {
@@ -171,6 +193,219 @@ async function readViewState() {
   }
 }
 
+async function saveRecentBooks(books) {
+  try {
+    const db = await openLastSessionDb();
+    await new Promise((resolve, reject) => {
+      const tx = db.transaction(LAST_SESSION_STORE_NAME, "readwrite");
+      const store = tx.objectStore(LAST_SESSION_STORE_NAME);
+      store.put(books, RECENT_BOOKS_KEY);
+      tx.oncomplete = () => resolve();
+      tx.onerror = () => reject(tx.error);
+    });
+    db.close();
+  } catch {
+    // Ignore storage failures.
+  }
+}
+
+async function readRecentBooks() {
+  try {
+    const db = await openLastSessionDb();
+    const result = await new Promise((resolve, reject) => {
+      const tx = db.transaction(LAST_SESSION_STORE_NAME, "readonly");
+      const store = tx.objectStore(LAST_SESSION_STORE_NAME);
+      const request = store.get(RECENT_BOOKS_KEY);
+      request.onsuccess = () => resolve(request.result || []);
+      request.onerror = () => reject(request.error);
+    });
+    db.close();
+    return Array.isArray(result) ? result : [];
+  } catch {
+    return [];
+  }
+}
+
+function createLocalBookKey(file) {
+  const modified = Number(file?.lastModified) || 0;
+  const size = Number(file?.size) || 0;
+  const name = String(file?.name || "document.pdf").trim();
+  return `local:${name}:${size}:${modified}`;
+}
+
+function createUrlBookKey(url) {
+  return `url:${url}`;
+}
+
+async function renderBookPreviewFromCurrentDocument() {
+  if (!state.pdfDocument) return "";
+  try {
+    const page = await state.pdfDocument.getPage(1);
+    const viewport = page.getViewport({ scale: 1, rotation: state.rotation });
+    const targetWidth = 220;
+    const previewScale = Math.min(Math.max(targetWidth / viewport.width, 0.1), 0.45);
+    const previewViewport = page.getViewport({
+      scale: previewScale,
+      rotation: state.rotation,
+    });
+    const canvas = document.createElement("canvas");
+    canvas.width = Math.max(1, Math.floor(previewViewport.width));
+    canvas.height = Math.max(1, Math.floor(previewViewport.height));
+    const context = canvas.getContext("2d", { alpha: false });
+    await page.render({
+      canvasContext: context,
+      viewport: previewViewport,
+    }).promise;
+    return canvas.toDataURL("image/jpeg", 0.72);
+  } catch {
+    return "";
+  }
+}
+
+function formatBookSubtitle(item) {
+  const source = item.type === "url" ? "URL" : "Local file";
+  const page = Number(item.lastPage) > 0 ? `Page ${item.lastPage}` : "Page 1";
+  return `${source} · ${page}`;
+}
+
+async function upsertRecentBook(entry) {
+  if (!entry?.bookKey) return;
+  const existing = await readRecentBooks();
+  const filtered = existing.filter((item) => item?.bookKey !== entry.bookKey);
+  filtered.unshift({ ...entry, updatedAt: nowMillis() });
+  await saveRecentBooks(filtered.slice(0, MAX_RECENT_BOOKS));
+}
+
+async function updateCurrentBookProgress() {
+  if (!state.currentBookKey) return;
+  const existing = await readRecentBooks();
+  const index = existing.findIndex((item) => item?.bookKey === state.currentBookKey);
+  if (index < 0) return;
+  const next = [...existing];
+  const item = { ...next[index], lastPage: state.currentPageNumber || 1, updatedAt: nowMillis() };
+  next.splice(index, 1);
+  next.unshift(item);
+  await saveRecentBooks(next.slice(0, MAX_RECENT_BOOKS));
+}
+
+function closePreviousBooksDialog() {
+  if (!previousBooksOverlay) return;
+  previousBooksOverlay.classList.add("hidden");
+  previousBooksOverlay.setAttribute("aria-hidden", "true");
+}
+
+async function openRecentBookFromDialog(item) {
+  if (!item) return;
+  closePreviousBooksDialog();
+  state.pendingViewState = {
+    pageNumber: Number(item.lastPage) || 1,
+  };
+  if (item.type === "local") {
+    let localBytes = null;
+    if (item.data) {
+      localBytes = new Uint8Array(item.data);
+    } else {
+      const lastSession = await readLastSession();
+      if (
+        lastSession?.type === "local" &&
+        lastSession.data &&
+        (lastSession.name || "") === (item.name || "")
+      ) {
+        localBytes = new Uint8Array(lastSession.data);
+      }
+    }
+    if (!localBytes) {
+      setStatus("Local file data is unavailable. Please open the file again.");
+      return;
+    }
+    const blob = new Blob([localBytes], { type: "application/pdf" });
+    revokeLocalObjectUrl();
+    state.localObjectUrl = URL.createObjectURL(blob);
+    await loadDocument({ data: localBytes }, item.name || "document.pdf", "");
+    state.currentBookKey = item.bookKey || "";
+    await saveLastSession({
+      type: "local",
+      name: item.name || "document.pdf",
+      data: localBytes.buffer,
+    });
+    await upsertRecentBook({
+      ...item,
+      lastPage: Number(item.lastPage) || 1,
+    });
+    return;
+  }
+  if (item.type === "url" && typeof item.url === "string") {
+    pdfUrlInput.value = item.url;
+    await loadDocument(
+      { url: item.url },
+      item.name || item.url.split("/").pop() || "document.pdf",
+      item.url
+    );
+    state.currentBookKey = item.bookKey || "";
+    await saveLastSession({
+      type: "url",
+      url: item.url,
+    });
+    await upsertRecentBook({
+      ...item,
+      lastPage: Number(item.lastPage) || 1,
+    });
+  }
+}
+
+function renderPreviousBooksDialogItems(items) {
+  if (!previousBooksList || !previousBooksEmpty) return;
+  previousBooksList.textContent = "";
+  previousBooksEmpty.style.display = items.length ? "none" : "";
+  for (const item of items) {
+    const li = document.createElement("li");
+    li.className = "previous-book-item";
+
+    const button = document.createElement("button");
+    button.type = "button";
+    button.className = "previous-book-button";
+    button.addEventListener("click", async () => {
+      await openRecentBookFromDialog(item);
+    });
+
+    if (item.previewDataUrl) {
+      const image = document.createElement("img");
+      image.className = "previous-book-preview";
+      image.src = item.previewDataUrl;
+      image.alt = `${item.name || "Book"} preview`;
+      button.appendChild(image);
+    } else {
+      const placeholder = document.createElement("div");
+      placeholder.className = "previous-book-preview-placeholder";
+      placeholder.textContent = "No preview";
+      button.appendChild(placeholder);
+    }
+
+    const meta = document.createElement("div");
+    meta.className = "previous-book-meta";
+    const title = document.createElement("div");
+    title.className = "previous-book-title";
+    title.textContent = item.name || "document.pdf";
+    const subtitle = document.createElement("div");
+    subtitle.className = "previous-book-subtitle";
+    subtitle.textContent = formatBookSubtitle(item);
+    meta.appendChild(title);
+    meta.appendChild(subtitle);
+    button.appendChild(meta);
+
+    li.appendChild(button);
+    previousBooksList.appendChild(li);
+  }
+}
+
+async function openPreviousBooksDialog() {
+  if (!previousBooksOverlay) return;
+  const items = await readRecentBooks();
+  renderPreviousBooksDialogItems(items);
+  previousBooksOverlay.classList.remove("hidden");
+  previousBooksOverlay.setAttribute("aria-hidden", "false");
+}
+
 function buildCurrentViewState() {
   return {
     pageNumber: state.currentPageNumber,
@@ -205,6 +440,7 @@ function updateControls() {
   downloadButton.disabled = !hasDocument;
   contentsTabButton.disabled = !hasDocument || !state.hasContents;
   pagesTabButton.disabled = !hasDocument;
+  collapseAllTocButton.disabled = !hasDocument || !state.hasContents;
 
   pageNumberInput.value = String(state.currentPageNumber || 1);
   pageCountLabel.textContent = `/${pageCount}`;
@@ -236,6 +472,18 @@ function highlightActiveTocEntry() {
   }
   activeEntry.button.classList.add("active");
   state.activeTocButton = activeEntry.button;
+}
+
+function collapseAllTocSections() {
+  const sublists = tocList.querySelectorAll(".toc-sublist");
+  const toggles = tocList.querySelectorAll(".toc-item-toggle");
+  for (const sublist of sublists) {
+    sublist.classList.add("collapsed");
+  }
+  for (const toggle of toggles) {
+    toggle.textContent = "+";
+    toggle.setAttribute("aria-expanded", "false");
+  }
 }
 
 function revokeLocalObjectUrl() {
@@ -287,6 +535,7 @@ async function closeActiveDocument() {
   state.hasContents = false;
   state.tocPageEntries = [];
   state.activeTocButton = null;
+  state.currentBookKey = "";
   state.panelMode = null;
   state.panelVisible = true;
   pagesContainer.textContent = "";
@@ -405,6 +654,15 @@ function renderOutlineNodes(parentList, nodes, pageEntries = []) {
     pageSpan.className = "toc-item-page";
     pageSpan.textContent = typeof item.pageNumber === "number" ? String(item.pageNumber) : "";
 
+    if (showPreview) {
+      const palette = tocPreviewPaletteVars(item.title, previewPage);
+      const previewIcon = document.createElement("span");
+      previewIcon.className = "toc-item-preview-icon";
+      previewIcon.style.setProperty("--toc-dot-a", palette.a);
+      previewIcon.style.setProperty("--toc-dot-b", palette.b);
+      previewIcon.setAttribute("aria-hidden", "true");
+      button.appendChild(previewIcon);
+    }
     button.appendChild(titleSpan);
     if (typeof item.pageNumber === "number") {
       button.dataset.pageNumber = String(item.pageNumber);
@@ -440,16 +698,6 @@ function renderOutlineNodes(parentList, nodes, pageEntries = []) {
       const spacer = document.createElement("span");
       spacer.className = "toc-item-toggle-spacer";
       row.appendChild(spacer);
-    }
-
-    if (showPreview) {
-      const palette = tocPreviewPaletteVars(item.title, previewPage);
-      const previewIcon = document.createElement("span");
-      previewIcon.className = "toc-item-preview-icon";
-      previewIcon.style.setProperty("--toc-dot-a", palette.a);
-      previewIcon.style.setProperty("--toc-dot-b", palette.b);
-      previewIcon.setAttribute("aria-hidden", "true");
-      row.appendChild(previewIcon);
     }
 
     row.appendChild(button);
@@ -822,7 +1070,7 @@ async function loadDocument(taskOptions, sourceName, sourceUrl) {
         viewerContainer.scrollTop = Number(view.scrollTop);
       }
     } else {
-      scrollToPage(1);
+      scrollToPage(1, true);
     }
     scheduleViewStatePersist();
   } catch (error) {
@@ -841,6 +1089,16 @@ async function openPdfFromFile(file) {
   revokeLocalObjectUrl();
   state.localObjectUrl = URL.createObjectURL(file);
   await loadDocument({ data: bytes }, file.name, "");
+  const previewDataUrl = await renderBookPreviewFromCurrentDocument();
+  const bookKey = createLocalBookKey(file);
+  state.currentBookKey = bookKey;
+  await upsertRecentBook({
+    bookKey,
+    type: "local",
+    name: file.name,
+    previewDataUrl,
+    lastPage: state.currentPageNumber || 1,
+  });
   await saveLastSession({
     type: "local",
     name: file.name,
@@ -863,6 +1121,17 @@ async function openPdfFromUrl(rawValue) {
     }
     const url = parsed.toString();
     await loadDocument({ url }, parsed.pathname.split("/").pop() || "document.pdf", url);
+    const previewDataUrl = await renderBookPreviewFromCurrentDocument();
+    const bookKey = createUrlBookKey(url);
+    state.currentBookKey = bookKey;
+    await upsertRecentBook({
+      bookKey,
+      type: "url",
+      name: parsed.pathname.split("/").pop() || url,
+      url,
+      previewDataUrl,
+      lastPage: state.currentPageNumber || 1,
+    });
     await saveLastSession({
       type: "url",
       url,
@@ -888,6 +1157,7 @@ async function restoreLastSessionIfAny() {
         lastSession.name || "document.pdf",
         ""
       );
+      state.currentBookKey = "";
       setStatus(`Restored: ${lastSession.name || "document.pdf"}`);
       return;
     } catch {
@@ -904,9 +1174,10 @@ async function restoreLastSessionIfAny() {
 function scrollToPage(pageNumber, immediate = false) {
   const pageElement = state.pageElements[pageNumber - 1];
   if (!pageElement) return;
-  pageElement.scrollIntoView({
+  const targetTop = Math.max(0, pageElement.offsetTop);
+  viewerContainer.scrollTo({
+    top: targetTop,
     behavior: immediate ? "auto" : "smooth",
-    block: "start",
   });
 }
 
@@ -965,6 +1236,7 @@ async function setPage(pageNumber, shouldScroll = true, immediate = false) {
   highlightActiveTocEntry();
   requestRenderAround(targetPage);
   scheduleViewStatePersist();
+  updateCurrentBookProgress();
   if (shouldScroll) {
     scrollToPage(targetPage, immediate);
   }
@@ -1014,6 +1286,9 @@ function triggerDownload() {
 }
 
 openFileButton.addEventListener("click", () => pdfFileInput.click());
+previousBooksButton.addEventListener("click", () => {
+  openPreviousBooksDialog();
+});
 pdfFileInput.addEventListener("change", async (event) => {
   const file = event.target.files?.[0];
   await openPdfFromFile(file);
@@ -1030,7 +1305,17 @@ pdfUrlInput.addEventListener("keydown", async (event) => {
   }
 });
 
-pageNumberInput.addEventListener("change", async () => setPage(pageNumberInput.value));
+async function commitPageNumberInput() {
+  await setPage(pageNumberInput.value, true, true);
+}
+
+pageNumberInput.addEventListener("change", commitPageNumberInput);
+pageNumberInput.addEventListener("keydown", async (event) => {
+  if (event.key !== "Enter") return;
+  event.preventDefault();
+  await commitPageNumberInput();
+  pageNumberInput.blur();
+});
 zoomOutButton.addEventListener("click", async () => setScale(state.scale - 0.1));
 zoomInButton.addEventListener("click", async () => setScale(state.scale + 0.1));
 fitWidthButton.addEventListener("click", async () => fitToWidth());
@@ -1051,6 +1336,10 @@ pagesTabButton.addEventListener("click", () => {
   if (!state.pdfDocument) return;
   state.panelVisible = true;
   setPanelMode("pages");
+});
+collapseAllTocButton.addEventListener("click", () => {
+  if (!state.hasContents) return;
+  collapseAllTocSections();
 });
 hamburgerButton.addEventListener("click", () => {
   const hasPanelMode = state.panelMode === "contents" || state.panelMode === "pages";
@@ -1194,7 +1483,31 @@ function initShortcutsDialog() {
   });
 }
 
+function initPreviousBooksDialog() {
+  if (
+    !previousBooksOverlay ||
+    !previousBooksCloseButton ||
+    !previousBooksButton ||
+    !previousBooksList ||
+    !previousBooksEmpty
+  ) {
+    return;
+  }
+  previousBooksCloseButton.addEventListener("click", closePreviousBooksDialog);
+  previousBooksOverlay.addEventListener("click", (event) => {
+    if (event.target === previousBooksOverlay) {
+      closePreviousBooksDialog();
+    }
+  });
+  window.addEventListener("keydown", (event) => {
+    if (event.key === "Escape" && !previousBooksOverlay.classList.contains("hidden")) {
+      closePreviousBooksDialog();
+    }
+  });
+}
+
 window.addEventListener("keydown", async (event) => {
+  if (isEditableTarget(event.target)) return;
   if (isHotkeyMatch(event, state.customHotkeys.viewerWhatIs)) {
     event.preventDefault();
     const selectedText = window.getSelection().toString().trim();
@@ -1247,6 +1560,7 @@ window.addEventListener("beforeunload", async () => {
 });
 
 initShortcutsDialog();
+initPreviousBooksDialog();
 loadCustomHotkeys();
 chrome.storage.onChanged.addListener((changes, areaName) => {
   if (areaName === "local" && changes.customViewerHotkeys) {

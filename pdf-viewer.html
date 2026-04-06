@@ -14,6 +14,7 @@
         <button id="hamburgerButton" type="button" class="icon-button" title="Toggle side panel">☰</button>
         <button id="shortcutsHelpButton" type="button" class="icon-button" title="Keyboard shortcuts">⌨</button>
         <button id="openFileButton" type="button" title="Open file">Open</button>
+        <button id="previousBooksButton" type="button" title="Open previous books">Previous</button>
         <input id="pdfUrlInput" type="url" placeholder="https://example.com/file.pdf" />
         <button id="openUrlButton" type="button" title="Open URL">Go</button>
         <button id="downloadButton" type="button" title="Download" disabled>Save</button>
@@ -41,6 +42,11 @@
             </button>
           </div>
           <section id="contentsPanel" class="panel-section">
+            <div class="toc-controls">
+              <button id="collapseAllTocButton" type="button" class="toc-control-button" disabled>
+                Collapse all
+              </button>
+            </div>
             <div id="tocEmpty" class="panel-empty">No outline in this PDF.</div>
             <ul id="tocList" class="toc-list"></ul>
           </section>
@@ -54,6 +60,26 @@
         </section>
       </section>
     </main>
+
+    <div
+      id="previousBooksOverlay"
+      class="previous-books-overlay hidden"
+      role="dialog"
+      aria-modal="true"
+      aria-hidden="true"
+      aria-labelledby="previousBooksDialogTitle"
+    >
+      <div class="previous-books-dialog">
+        <div class="previous-books-dialog-header">
+          <h2 id="previousBooksDialogTitle">Previous books</h2>
+          <button type="button" id="previousBooksCloseButton" class="icon-button" aria-label="Close">
+            ×
+          </button>
+        </div>
+        <div id="previousBooksEmpty" class="previous-books-empty">No previously opened books yet.</div>
+        <ul id="previousBooksList" class="previous-books-list"></ul>
+      </div>
+    </div>
 
     <div
       id="shortcutsOverlay"

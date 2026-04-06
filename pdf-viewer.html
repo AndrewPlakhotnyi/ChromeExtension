@@ -18,6 +18,7 @@
         <input id="pdfUrlInput" type="url" placeholder="https://example.com/file.pdf" />
         <button id="openUrlButton" type="button" title="Open URL">Go</button>
         <button id="downloadButton" type="button" title="Download" disabled>Save</button>
+        <button id="metadataButton" type="button" class="icon-button" title="PDF metadata" disabled>ℹ</button>
         <input id="pageNumberInput" type="number" min="1" value="1" />
         <span id="pageCountLabel">/0</span>
         <button id="zoomOutButton" type="button" disabled>-</button>
@@ -43,6 +44,14 @@
           </div>
           <section id="contentsPanel" class="panel-section">
             <div class="toc-controls">
+              <input
+                id="tocSearchInput"
+                type="search"
+                class="toc-search-input"
+                placeholder="Search contents"
+                aria-label="Search contents"
+                disabled
+              />
               <button id="collapseAllTocButton" type="button" class="toc-control-button" disabled>
                 Collapse all
               </button>
@@ -78,6 +87,23 @@
         </div>
         <div id="previousBooksEmpty" class="previous-books-empty">No previously opened books yet.</div>
         <ul id="previousBooksList" class="previous-books-list"></ul>
+      </div>
+    </div>
+
+    <div
+      id="metadataOverlay"
+      class="metadata-overlay hidden"
+      role="dialog"
+      aria-modal="true"
+      aria-hidden="true"
+      aria-labelledby="metadataDialogTitle"
+    >
+      <div class="metadata-dialog">
+        <div class="metadata-dialog-header">
+          <h2 id="metadataDialogTitle">PDF metadata</h2>
+          <button type="button" id="metadataCloseButton" class="icon-button" aria-label="Close">×</button>
+        </div>
+        <div id="metadataDialogBody" class="metadata-dialog-body"></div>
       </div>
     </div>
 

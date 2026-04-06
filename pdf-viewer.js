@@ -10,6 +10,7 @@ const previousBooksButton = document.getElementById("previousBooksButton");
 const pdfUrlInput = document.getElementById("pdfUrlInput");
 const openUrlButton = document.getElementById("openUrlButton");
 const downloadButton = document.getElementById("downloadButton");
+const metadataButton = document.getElementById("metadataButton");
 const contentsTabButton = document.getElementById("contentsTabButton");
 const pagesTabButton = document.getElementById("pagesTabButton");
 const themeButton = document.getElementById("themeButton");
@@ -25,12 +26,16 @@ const contentsPanel = document.getElementById("contentsPanel");
 const thumbnailsPanel = document.getElementById("thumbnailsPanel");
 const tocList = document.getElementById("tocList");
 const tocEmpty = document.getElementById("tocEmpty");
+const tocSearchInput = document.getElementById("tocSearchInput");
 const collapseAllTocButton = document.getElementById("collapseAllTocButton");
 const thumbsList = document.getElementById("thumbsList");
 const thumbsEmpty = document.getElementById("thumbsEmpty");
 const viewerContainer = document.getElementById("viewerContainer");
 const pagesContainer = document.getElementById("pagesContainer");
 const statusText = document.getElementById("statusText");
+const metadataOverlay = document.getElementById("metadataOverlay");
+const metadataDialogBody = document.getElementById("metadataDialogBody");
+const metadataCloseButton = document.getElementById("metadataCloseButton");
 const previousBooksOverlay = document.getElementById("previousBooksOverlay");
 const previousBooksList = document.getElementById("previousBooksList");
 const previousBooksEmpty = document.getElementById("previousBooksEmpty");
@@ -72,6 +77,7 @@ const state = {
   tocPageEntries: [],
   activeTocButton: null,
   currentBookKey: "",
+  metadataCache: null,
 };
 
 let viewStatePersistTimer = null;
@@ -102,6 +108,102 @@ function normalizeUrlInput(rawValue) {
   const value = rawValue.trim();
   if (!value) return "";
   return /^https?:\/\//i.test(value) ? value : `https://${value}`;
+}
+
+function formatPdfDateString(value) {
+  if (typeof value !== "string" || !value.trim()) return "";
+  const normalized = value.trim();
+  const match =
+    /^D:(\d{4})(\d{2})?(\d{2})?(\d{2})?(\d{2})?(\d{2})?(Z|[+\-]\d{2}'?\d{2}'?)?$/.exec(
+      normalized
+    );
+  if (!match) return normalized;
+  const year = match[1];
+  const month = match[2] || "01";
+  const day = match[3] || "01";
+  const hour = match[4] || "00";
+  const minute = match[5] || "00";
+  const second = match[6] || "00";
+  return `${year}-${month}-${day} ${hour}:${minute}:${second}`;
+}
+
+function normalizeMetadataValue(value) {
+  if (value == null) return "—";
+  if (typeof value === "string") {
+    const trimmed = value.trim();
+    return trimmed ? trimmed : "—";
+  }
+  if (typeof value === "number" || typeof value === "boolean") {
+    return String(value);
+  }
+  try {
+    const json = JSON.stringify(value);
+    return json && json !== "{}" ? json : "—";
+  } catch {
+    return String(value);
+  }
+}
+
+function closeMetadataDialog() {
+  if (!metadataOverlay) return;
+  metadataOverlay.classList.add("hidden");
+  metadataOverlay.setAttribute("aria-hidden", "true");
+}
+
+async function readPdfMetadataRows() {
+  if (!state.pdfDocument) return [];
+  if (Array.isArray(state.metadataCache) && state.metadataCache.length) {
+    return state.metadataCache;
+  }
+  let metadata = null;
+  let info = null;
+  try {
+    const result = await state.pdfDocument.getMetadata();
+    metadata = result?.metadata || null;
+    info = result?.info || null;
+  } catch {
+    // Keep dialog usable even when metadata extraction fails.
+  }
+
+  const rows = [
+    { label: "File name", value: state.sourceName },
+    { label: "Source URL", value: state.sourceUrl || "Local file" },
+    { label: "Pages", value: state.pdfDocument.numPages },
+    { label: "Title", value: info?.Title || metadata?.get?.("dc:title") },
+    { label: "Author", value: info?.Author || metadata?.get?.("dc:creator") },
+    { label: "Subject", value: info?.Subject },
+    { label: "Keywords", value: info?.Keywords },
+    { label: "Creator", value: info?.Creator },
+    { label: "Producer", value: info?.Producer },
+    { label: "PDF version", value: info?.PDFFormatVersion },
+    { label: "Creation date", value: formatPdfDateString(info?.CreationDate) },
+    { label: "Modified date", value: formatPdfDateString(info?.ModDate) },
+    { label: "Language", value: info?.Lang },
+  ].map((row) => ({ label: row.label, value: normalizeMetadataValue(row.value) }));
+
+  state.metadataCache = rows;
+  return rows;
+}
+
+async function openMetadataDialog() {
+  if (!metadataOverlay || !metadataDialogBody || !state.pdfDocument) return;
+  metadataDialogBody.textContent = "";
+  const rows = await readPdfMetadataRows();
+  for (const row of rows) {
+    const rowElement = document.createElement("div");
+    rowElement.className = "metadata-row";
+    const key = document.createElement("div");
+    key.className = "metadata-key";
+    key.textContent = row.label;
+    const value = document.createElement("div");
+    value.className = "metadata-value";
+    value.textContent = row.value;
+    rowElement.appendChild(key);
+    rowElement.appendChild(value);
+    metadataDialogBody.appendChild(rowElement);
+  }
+  metadataOverlay.classList.remove("hidden");
+  metadataOverlay.setAttribute("aria-hidden", "false");
 }
 
 function isEditableTarget(target) {
@@ -438,8 +540,10 @@ function updateControls() {
   fitWidthButton.disabled = !hasDocument;
   rotateButton.disabled = !hasDocument;
   downloadButton.disabled = !hasDocument;
+  metadataButton.disabled = !hasDocument;
   contentsTabButton.disabled = !hasDocument || !state.hasContents;
   pagesTabButton.disabled = !hasDocument;
+  tocSearchInput.disabled = !hasDocument || !state.hasContents;
   collapseAllTocButton.disabled = !hasDocument || !state.hasContents;
 
   pageNumberInput.value = String(state.currentPageNumber || 1);
@@ -483,6 +587,93 @@ function collapseAllTocSections() {
   for (const toggle of toggles) {
     toggle.textContent = "+";
     toggle.setAttribute("aria-expanded", "false");
+  }
+}
+
+function normalizeTocSearchQuery(query) {
+  return String(query || "").trim().toLowerCase();
+}
+
+function setTocItemTitleHighlight(node, normalizedQuery) {
+  const titleSpan = node.querySelector(":scope > .toc-item-row .toc-item-title");
+  if (!titleSpan) return;
+  const fullTitle = titleSpan.dataset.fullTitle || titleSpan.textContent || "";
+  titleSpan.dataset.fullTitle = fullTitle;
+
+  if (!normalizedQuery) {
+    titleSpan.textContent = fullTitle;
+    return;
+  }
+
+  const titleLower = fullTitle.toLowerCase();
+  let startIndex = titleLower.indexOf(normalizedQuery);
+  if (startIndex < 0) {
+    titleSpan.textContent = fullTitle;
+    return;
+  }
+
+  titleSpan.textContent = "";
+  let cursor = 0;
+  while (startIndex >= 0) {
+    if (startIndex > cursor) {
+      titleSpan.appendChild(document.createTextNode(fullTitle.slice(cursor, startIndex)));
+    }
+    const mark = document.createElement("mark");
+    mark.className = "toc-search-highlight";
+    mark.textContent = fullTitle.slice(startIndex, startIndex + normalizedQuery.length);
+    titleSpan.appendChild(mark);
+    cursor = startIndex + normalizedQuery.length;
+    startIndex = titleLower.indexOf(normalizedQuery, cursor);
+  }
+  if (cursor < fullTitle.length) {
+    titleSpan.appendChild(document.createTextNode(fullTitle.slice(cursor)));
+  }
+}
+
+function clearTocSearchState() {
+  const allItems = tocList.querySelectorAll(".toc-item");
+  const allSubLists = tocList.querySelectorAll(".toc-sublist");
+  for (const item of allItems) {
+    item.classList.remove("toc-item-hidden");
+    setTocItemTitleHighlight(item, "");
+  }
+  for (const subList of allSubLists) {
+    subList.classList.remove("toc-sublist-search-open");
+  }
+}
+
+function filterTocItemsByQuery(query) {
+  const normalizedQuery = normalizeTocSearchQuery(query);
+  if (!normalizedQuery) {
+    clearTocSearchState();
+    return;
+  }
+
+  const visitNode = (node) => {
+    const ownTitle = node.dataset.searchTitle || "";
+    const ownMatch = ownTitle.includes(normalizedQuery);
+    setTocItemTitleHighlight(node, ownMatch ? normalizedQuery : "");
+    const childList = node.querySelector(":scope > .toc-sublist");
+    let childMatch = false;
+
+    if (childList) {
+      const childItems = childList.querySelectorAll(":scope > .toc-item");
+      for (const child of childItems) {
+        if (visitNode(child)) {
+          childMatch = true;
+        }
+      }
+      childList.classList.toggle("toc-sublist-search-open", childMatch);
+    }
+
+    const isVisible = ownMatch || childMatch;
+    node.classList.toggle("toc-item-hidden", !isVisible);
+    return isVisible;
+  };
+
+  const topLevelItems = tocList.querySelectorAll(":scope > .toc-item");
+  for (const item of topLevelItems) {
+    visitNode(item);
   }
 }
 
@@ -536,6 +727,8 @@ async function closeActiveDocument() {
   state.tocPageEntries = [];
   state.activeTocButton = null;
   state.currentBookKey = "";
+  state.metadataCache = null;
+  closeMetadataDialog();
   state.panelMode = null;
   state.panelVisible = true;
   pagesContainer.textContent = "";
@@ -630,6 +823,7 @@ function renderOutlineNodes(parentList, nodes, pageEntries = []) {
     const li = document.createElement("li");
     li.className = "toc-item";
     li.dataset.depth = String(item.depth);
+    li.dataset.searchTitle = item.title.toLowerCase();
     if (hasChildren) {
       li.classList.add("toc-item-parent");
     }
@@ -714,6 +908,7 @@ function renderOutlineNodes(parentList, nodes, pageEntries = []) {
 async function renderContents() {
   tocList.textContent = "";
   tocEmpty.style.display = "";
+  tocSearchInput.value = "";
   state.hasContents = false;
   state.tocPageEntries = [];
   state.activeTocButton = null;
@@ -1341,6 +1536,9 @@ collapseAllTocButton.addEventListener("click", () => {
   if (!state.hasContents) return;
   collapseAllTocSections();
 });
+tocSearchInput.addEventListener("input", () => {
+  filterTocItemsByQuery(tocSearchInput.value);
+});
 hamburgerButton.addEventListener("click", () => {
   const hasPanelMode = state.panelMode === "contents" || state.panelMode === "pages";
   if (!hasPanelMode) {
@@ -1506,6 +1704,24 @@ function initPreviousBooksDialog() {
   });
 }
 
+function initMetadataDialog() {
+  if (!metadataOverlay || !metadataCloseButton || !metadataButton) return;
+  metadataButton.addEventListener("click", () => {
+    void openMetadataDialog();
+  });
+  metadataCloseButton.addEventListener("click", closeMetadataDialog);
+  metadataOverlay.addEventListener("click", (event) => {
+    if (event.target === metadataOverlay) {
+      closeMetadataDialog();
+    }
+  });
+  window.addEventListener("keydown", (event) => {
+    if (event.key === "Escape" && !metadataOverlay.classList.contains("hidden")) {
+      closeMetadataDialog();
+    }
+  });
+}
+
 window.addEventListener("keydown", async (event) => {
   if (isEditableTarget(event.target)) return;
   if (isHotkeyMatch(event, state.customHotkeys.viewerWhatIs)) {
@@ -1561,6 +1777,7 @@ window.addEventListener("beforeunload", async () => {
 
 initShortcutsDialog();
 initPreviousBooksDialog();
+initMetadataDialog();
 loadCustomHotkeys();
 chrome.storage.onChanged.addListener((changes, areaName) => {
   if (areaName === "local" && changes.customViewerHotkeys) {

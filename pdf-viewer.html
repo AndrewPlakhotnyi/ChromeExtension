@@ -1,0 +1,86 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>PDF Viewer</title>
+    <link rel="stylesheet" href="pdf-viewer.css" />
+    <link rel="stylesheet" href="shortcuts-dialog.css" />
+  </head>
+  <body class="dark">
+    <main class="viewer-app">
+      <section class="toolbar">
+        <input id="pdfFileInput" type="file" accept="application/pdf,.pdf" hidden />
+        <button id="hamburgerButton" type="button" class="icon-button" title="Toggle side panel">☰</button>
+        <button id="shortcutsHelpButton" type="button" class="icon-button" title="Keyboard shortcuts">⌨</button>
+        <button id="openFileButton" type="button" title="Open file">Open</button>
+        <input id="pdfUrlInput" type="url" placeholder="https://example.com/file.pdf" />
+        <button id="openUrlButton" type="button" title="Open URL">Go</button>
+        <button id="downloadButton" type="button" title="Download" disabled>Save</button>
+        <input id="pageNumberInput" type="number" min="1" value="1" />
+        <span id="pageCountLabel">/0</span>
+        <button id="zoomOutButton" type="button" disabled>-</button>
+        <span id="zoomLabel">100%</span>
+        <button id="zoomInButton" type="button" disabled>+</button>
+        <button id="fitWidthButton" type="button" title="Fit width" disabled>Fit</button>
+        <button id="rotateButton" type="button" title="Rotate" disabled>R</button>
+        <button id="themeButton" type="button" class="icon-button" title="Toggle theme">☀</button>
+        <span id="statusText" class="status">No document loaded.</span>
+      </section>
+
+      <section class="viewer-layout">
+        <aside id="sidePanel" class="side-panel">
+          <div class="panel-tabs">
+            <button id="contentsTabButton" class="panel-tab active" type="button">
+              <span class="panel-tab-icon" aria-hidden="true">☷</span>
+              <span>Contents</span>
+            </button>
+            <button id="pagesTabButton" class="panel-tab" type="button">
+              <span class="panel-tab-icon" aria-hidden="true">▤</span>
+              <span>Pages</span>
+            </button>
+          </div>
+          <section id="contentsPanel" class="panel-section">
+            <div id="tocEmpty" class="panel-empty">No outline in this PDF.</div>
+            <ul id="tocList" class="toc-list"></ul>
+          </section>
+          <section id="thumbnailsPanel" class="panel-section hidden">
+            <div id="thumbsEmpty" class="panel-empty">No pages loaded.</div>
+            <ul id="thumbsList" class="thumbs-list"></ul>
+          </section>
+        </aside>
+        <section id="viewerContainer" class="viewer-container">
+          <div id="pagesContainer" class="pages-container"></div>
+        </section>
+      </section>
+    </main>
+
+    <div
+      id="shortcutsOverlay"
+      class="shortcuts-overlay hidden"
+      role="dialog"
+      aria-modal="true"
+      aria-hidden="true"
+      aria-labelledby="shortcutsDialogTitle"
+    >
+      <div class="shortcuts-dialog">
+        <div class="shortcuts-dialog-header">
+          <h2 id="shortcutsDialogTitle">Keyboard shortcuts</h2>
+          <button type="button" id="shortcutsCloseButton" class="icon-button" aria-label="Close">
+            ×
+          </button>
+        </div>
+        <div id="shortcutsDialogBody" class="shortcuts-dialog-body"></div>
+        <div class="shortcuts-dialog-footer">
+          <button type="button" id="shortcutsOpenOptionsButton" class="shortcuts-footer-secondary">
+            Open full settings tab
+          </button>
+          <button type="button" id="shortcutsRefreshButton">Refresh</button>
+          <button type="button" id="shortcutsDoneButton">Done</button>
+        </div>
+      </div>
+    </div>
+
+    <script type="module" src="pdf-viewer.js"></script>
+  </body>
+</html>

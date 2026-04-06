@@ -1,0 +1,265 @@
+.shortcuts-intro,
+.shortcuts-note {
+  margin: 0 0 12px;
+  font-size: 13px;
+  line-height: 1.45;
+  color: #c4c4c4;
+}
+
+.options-body {
+  margin: 0;
+  padding: 20px 24px 32px;
+  font-family: Segoe UI, system-ui, sans-serif;
+  background: #1a1a1a;
+  color: #e8e8e8;
+  min-height: 100vh;
+}
+
+.options-body h1 {
+  margin: 0 0 16px;
+  font-size: 20px;
+  font-weight: 600;
+}
+
+.shortcuts-subheading {
+  margin: 18px 0 8px;
+  font-size: 14px;
+  font-weight: 600;
+  color: #fff;
+}
+
+.shortcuts-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 13px;
+}
+
+.shortcuts-table th,
+.shortcuts-table td {
+  text-align: left;
+  padding: 8px 10px;
+  border-bottom: 1px solid #333;
+}
+
+.shortcuts-table th {
+  color: #9a9a9a;
+  font-weight: 600;
+}
+
+.shortcuts-current-key {
+  font-family: Consolas, monospace;
+  color: #a8d4ff;
+  white-space: nowrap;
+}
+
+.shortcuts-inline-list {
+  margin: 0 0 8px 16px;
+  padding: 0;
+  font-size: 13px;
+  line-height: 1.6;
+  color: #c4c4c4;
+}
+
+.shortcuts-steps {
+  margin: 0 0 16px 20px;
+  padding: 0;
+  font-size: 13px;
+  line-height: 1.55;
+  color: #c4c4c4;
+}
+
+.shortcuts-steps li {
+  margin-bottom: 6px;
+}
+
+.shortcuts-url-row {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  flex-wrap: wrap;
+}
+
+.shortcuts-edit-row {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin: 0 0 12px;
+}
+
+.shortcuts-edit-label {
+  font-size: 13px;
+  font-weight: 600;
+  color: #e6e6e6;
+}
+
+.shortcuts-edit-controls {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.shortcuts-edit-controls .shortcuts-url-field {
+  min-width: 220px;
+}
+
+.shortcuts-edit-controls .shortcuts-copy-btn {
+  min-width: 78px;
+}
+
+.shortcuts-url-field {
+  flex: 1;
+  min-width: 200px;
+  padding: 8px 10px;
+  border: 1px solid #444;
+  border-radius: 4px;
+  background: #262626;
+  color: #e8e8e8;
+  font-size: 13px;
+  font-family: Consolas, monospace;
+}
+
+.shortcuts-copy-btn {
+  padding: 8px 14px;
+  border: 1px solid #555;
+  border-radius: 4px;
+  background: #333;
+  color: #fff;
+  font-size: 13px;
+  cursor: pointer;
+}
+
+.shortcuts-copy-btn:hover {
+  background: #404040;
+}
+
+.shortcuts-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 2147483000;
+  display: flex;
+  align-items: flex-start;
+  justify-content: center;
+  padding: 48px 16px 16px;
+  background: rgba(0, 0, 0, 0.55);
+  overflow: auto;
+  isolation: isolate;
+  pointer-events: auto;
+}
+
+.shortcuts-overlay.hidden {
+  display: none;
+}
+
+.shortcuts-dialog {
+  width: min(520px, 100%);
+  max-height: calc(100vh - 64px);
+  display: flex;
+  flex-direction: column;
+  border: 1px solid #3a3a3a;
+  border-radius: 8px;
+  background: #222;
+  box-shadow: 0 8px 32px rgba(0, 0, 0, 0.45);
+}
+
+.shortcuts-dialog-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 12px 14px;
+  border-bottom: 1px solid #333;
+}
+
+.shortcuts-dialog-header h2 {
+  margin: 0;
+  font-size: 16px;
+  font-weight: 600;
+  color: #fff;
+}
+
+.shortcuts-dialog-body {
+  padding: 14px;
+  overflow: auto;
+  flex: 1;
+}
+
+.shortcuts-dialog-footer {
+  display: flex;
+  justify-content: flex-end;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+  padding: 10px 14px;
+  border-top: 1px solid #333;
+}
+
+.shortcuts-footer-secondary {
+  margin-right: auto;
+  background: transparent !important;
+  border-color: #555 !important;
+  color: #aaa !important;
+}
+
+.shortcuts-footer-secondary:hover {
+  color: #fff !important;
+  background: #2a2a2a !important;
+}
+
+.shortcuts-dialog-footer button {
+  padding: 6px 14px;
+  border-radius: 4px;
+  border: 1px solid #555;
+  background: #333;
+  color: #eee;
+  font-size: 12px;
+  cursor: pointer;
+}
+
+.shortcuts-dialog-footer button:hover {
+  background: #404040;
+}
+
+.light .shortcuts-dialog {
+  background: #fff;
+  border-color: #d0d0d0;
+}
+
+.light .shortcuts-dialog-header,
+.light .shortcuts-dialog-footer {
+  border-color: #e0e0e0;
+}
+
+.light .shortcuts-dialog-header h2 {
+  color: #111;
+}
+
+.light .shortcuts-intro,
+.light .shortcuts-note,
+.light .shortcuts-steps,
+.light .shortcuts-inline-list {
+  color: #444;
+}
+
+.light .shortcuts-edit-label {
+  color: #222;
+}
+
+.light .shortcuts-table th,
+.light .shortcuts-table td {
+  border-color: #e8e8e8;
+}
+
+.light .shortcuts-table th {
+  color: #666;
+}
+
+.light .shortcuts-current-key {
+  color: #0b57d0;
+}
+
+.light .shortcuts-url-field {
+  background: #f5f5f5;
+  border-color: #ccc;
+  color: #111;
+}

@@ -96,12 +96,15 @@ async function runCommand(commandName) {
   });
   if (!activeTab?.id) return;
   const tabUrl = activeTab.url || "";
-  if (
+  const isOurExtensionPage = tabUrl.startsWith(
+    `chrome-extension://${chrome.runtime.id}/`
+  );
+  const isUnsupportedUrl =
     tabUrl.startsWith("chrome://") ||
-    tabUrl.startsWith("chrome-extension://") ||
     tabUrl.startsWith("edge://") ||
-    tabUrl.startsWith("about:")
-  ) {
+    tabUrl.startsWith("about:") ||
+    (tabUrl.startsWith("chrome-extension://") && !isOurExtensionPage);
+  if (isUnsupportedUrl) {
     return;
   }
 
@@ -124,6 +127,16 @@ chrome.commands.onCommand.addListener((commandName) => {
   runCommand(commandName);
 });
 
+chrome.action.onClicked.addListener(async (tab) => {
+  const viewerUrl = chrome.runtime.getURL("pdf-viewer.html");
+  const insertIndex = typeof tab?.index === "number" ? tab.index + 1 : undefined;
+  const createProps = { url: viewerUrl };
+  if (typeof insertIndex === "number") {
+    createProps.index = insertIndex;
+  }
+  await chrome.tabs.create(createProps);
+});
+
 chrome.runtime.onMessage.addListener((message, sender) => {
   if (typeof message?.text !== "string") return;
   const selectedText = message.text.trim();
@@ -136,6 +149,8 @@ chrome.runtime.onMessage.addListener((message, sender) => {
     openGoogleWhatIsSearchForSelection(selectedText, insertIndex);
   } else if (message.command === "search-selection-etymology") {
     openGoogleEtymologySearchForSelection(selectedText, insertIndex);
+  } else if (message.command === "translate-selection-ru") {
+    openGoogleTranslateRuForSelection(selectedText, insertIndex);
   }
 });
 
@@ -148,7 +163,7 @@ function ensureContextMenus() {
     });
     chrome.contextMenus.create({
       id: "search-selection-what-is",
-      title: "What is… (Alt+W)",
+      title: "What is… (Alt+Shift+W)",
       contexts: ["selection"],
     });
     chrome.contextMenus.create({
@@ -158,7 +173,7 @@ function ensureContextMenus() {
     });
     chrome.contextMenus.create({
       id: "translate-selection-ru",
-      title: "Translate selection to Russian (Alt+T)",
+      title: "Translate selection to Russian (Alt+Shift+T)",
       contexts: ["selection"],
     });
   });

@@ -96,6 +96,22 @@ async function loadCustomHotkeys() {
   }
 }
 
+async function openUrlInNewTabNextToCurrent(url) {
+  try {
+    const [activeTab] = await chrome.tabs.query({
+      active: true,
+      currentWindow: true,
+    });
+    const props = { url };
+    if (activeTab && typeof activeTab.index === "number") {
+      props.index = activeTab.index + 1;
+    }
+    await chrome.tabs.create(props);
+  } catch {
+    chrome.tabs.create({ url });
+  }
+}
+
 function setStatus(message) {
   statusText.textContent = message;
 }
@@ -1946,7 +1962,7 @@ window.addEventListener("keydown", async (event) => {
     const selectedText = window.getSelection().toString().trim();
     if (selectedText) {
       const query = encodeURIComponent(`What is ${selectedText}`);
-      chrome.tabs.create({ url: `https://www.google.com/search?q=${query}` });
+      await openUrlInNewTabNextToCurrent(`https://www.google.com/search?q=${query}`);
     }
     return;
   }
@@ -1955,7 +1971,7 @@ window.addEventListener("keydown", async (event) => {
     const selectedText = window.getSelection().toString().trim();
     if (selectedText) {
       const query = encodeURIComponent(`${selectedText} etymology`);
-      chrome.tabs.create({ url: `https://www.google.com/search?q=${query}` });
+      await openUrlInNewTabNextToCurrent(`https://www.google.com/search?q=${query}`);
     }
     return;
   }
@@ -1964,9 +1980,9 @@ window.addEventListener("keydown", async (event) => {
     const selectedText = window.getSelection().toString().trim();
     if (selectedText) {
       const text = encodeURIComponent(selectedText);
-      chrome.tabs.create({
-        url: `https://translate.google.com/?sl=auto&tl=ru&text=${text}`,
-      });
+      await openUrlInNewTabNextToCurrent(
+        `https://translate.google.com/?sl=auto&tl=ru&text=${text}`
+      );
     }
     return;
   }

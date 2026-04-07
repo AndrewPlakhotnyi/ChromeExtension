@@ -1,0 +1,10 @@
+---
+description: Always bump extension version after code changes
+alwaysApply: true
+---
+
+# Extension Version Bump
+
+- After making any code/content change in this repository, update `manifest.json` version in the same task.
+- Use semantic version patch increments by default (for example `1.3.6` -> `1.3.7`) unless the user requests minor/major bump.
+- Keep version bump in the same change set so the extension can be reloaded with a new version immediately.

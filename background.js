@@ -1,6 +1,7 @@
 let lastTabOpenDedupe = { dedupeKey: "", timestampMillis: 0 };
 const tabHistoryByWindowId = new Map();
 const ignoredActivationByWindowId = new Map();
+let previousTabSelectionChain = Promise.resolve();
 
 function pushTabIntoHistory(windowId, tabId) {
   if (typeof windowId !== "number" || typeof tabId !== "number") return;
@@ -29,22 +30,27 @@ async function activatePreviousTabFromHistory() {
   while (history.length && history[history.length - 1] === currentTabId) {
     history.pop();
   }
-  const previousTabId = history[history.length - 1];
-  if (typeof previousTabId !== "number") {
+  while (history.length) {
+    const previousTabId = history[history.length - 1];
+    if (typeof previousTabId !== "number") {
+      history.pop();
+      continue;
+    }
+    ignoredActivationByWindowId.set(windowId, previousTabId);
     tabHistoryByWindowId.set(windowId, history);
-    return;
+    try {
+      await chrome.tabs.update(previousTabId, { active: true });
+      return;
+    } catch {
+      // Tab could have been closed; keep scanning older history entries.
+      ignoredActivationByWindowId.delete(windowId);
+      while (history.length && history[history.length - 1] === previousTabId) {
+        history.pop();
+      }
+    }
   }
 
-  ignoredActivationByWindowId.set(windowId, previousTabId);
   tabHistoryByWindowId.set(windowId, history);
-  try {
-    await chrome.tabs.update(previousTabId, { active: true });
-  } catch {
-    // Tab could have been closed; clear stale id and keep history usable.
-    ignoredActivationByWindowId.delete(windowId);
-    const cleaned = history.filter((tabId) => tabId !== previousTabId);
-    tabHistoryByWindowId.set(windowId, cleaned);
-  }
 }
 function openTabUnlessDuplicate(dedupeKey, createUrl, insertIndex) {
   const now = Date.now();
@@ -55,11 +61,22 @@ function openTabUnlessDuplicate(dedupeKey, createUrl, insertIndex) {
     return;
   }
   lastTabOpenDedupe = { dedupeKey, timestampMillis: now };
-  const createProps = { url: createUrl() };
+  const doCreate = (index) => {
+    const createProps = { url: createUrl() };
+    if (typeof index === "number") {
+      createProps.index = index;
+    }
+    chrome.tabs.create(createProps);
+  };
   if (typeof insertIndex === "number") {
-    createProps.index = insertIndex;
+    doCreate(insertIndex);
+    return;
   }
-  chrome.tabs.create(createProps);
+  chrome.tabs.query({ active: true, currentWindow: true }, (tabs) => {
+    const tab = tabs?.[0];
+    const nextIndex = typeof tab?.index === "number" ? tab.index + 1 : undefined;
+    doCreate(nextIndex);
+  });
 }
 
 function openGoogleSearchForSelection(selectedText, insertIndex) {
@@ -138,7 +155,12 @@ async function runCommand(commandName) {
     return;
   }
   if (commandName === "select-previous-tab") {
-    await activatePreviousTabFromHistory();
+    previousTabSelectionChain = previousTabSelectionChain
+      .then(() => activatePreviousTabFromHistory())
+      .catch(() => {
+        // Keep the chain alive if one selection attempt fails.
+      });
+    await previousTabSelectionChain;
     return;
   }
   const [activeTab] = await chrome.tabs.query({

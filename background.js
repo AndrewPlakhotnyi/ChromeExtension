@@ -2,6 +2,7 @@ let lastTabOpenDedupe = { dedupeKey: "", timestampMillis: 0 };
 const tabHistoryByWindowId = new Map();
 const ignoredActivationByWindowId = new Map();
 let previousTabSelectionChain = Promise.resolve();
+const PDF_VIEWER_SELECTION_KEY = "pdfViewerSelectionText";
 
 function pushTabIntoHistory(windowId, tabId) {
   if (typeof windowId !== "number" || typeof tabId !== "number") return;
@@ -149,6 +150,15 @@ async function readSelectedTextFromTab(tabId) {
   }
 }
 
+async function readPdfViewerSelectionFromStorage() {
+  try {
+    const stored = await chrome.storage.local.get(PDF_VIEWER_SELECTION_KEY);
+    return String(stored?.[PDF_VIEWER_SELECTION_KEY] || "").trim();
+  } catch {
+    return "";
+  }
+}
+
 async function runCommand(commandName) {
   if (commandName === "close-tabs-to-the-right") {
     await closeTabsToTheRightOfActive();
@@ -181,7 +191,13 @@ async function runCommand(commandName) {
     return;
   }
 
-  const selectedText = await readSelectedTextFromTab(activeTab.id);
+  let selectedText = "";
+  if (isOurExtensionPage && tabUrl.endsWith("/pdf-viewer.html")) {
+    selectedText = await readPdfViewerSelectionFromStorage();
+  }
+  if (!selectedText) {
+    selectedText = await readSelectedTextFromTab(activeTab.id);
+  }
   if (!selectedText) return;
   const insertIndex =
     typeof activeTab.index === "number" ? activeTab.index + 1 : undefined;

@@ -47,6 +47,7 @@ const LAST_SESSION_KEY = "last-session";
 const LAST_VIEW_KEY = "last-view";
 const RECENT_BOOKS_KEY = "recent-books";
 const MAX_RECENT_BOOKS = 16;
+const PDF_VIEWER_SELECTION_KEY = "pdfViewerSelectionText";
 
 const state = {
   pdfDocument: null,
@@ -96,19 +97,14 @@ async function loadCustomHotkeys() {
   }
 }
 
-async function openUrlInNewTabNextToCurrent(url) {
+async function persistPdfViewerSelection() {
   try {
-    const [activeTab] = await chrome.tabs.query({
-      active: true,
-      currentWindow: true,
+    const selectedText = window.getSelection().toString().trim();
+    await chrome.storage.local.set({
+      [PDF_VIEWER_SELECTION_KEY]: selectedText,
     });
-    const props = { url };
-    if (activeTab && typeof activeTab.index === "number") {
-      props.index = activeTab.index + 1;
-    }
-    await chrome.tabs.create(props);
   } catch {
-    chrome.tabs.create({ url });
+    // Ignore storage failures.
   }
 }
 
@@ -1958,32 +1954,12 @@ window.addEventListener("keydown", async (event) => {
     return;
   }
   if (isHotkeyMatch(event, state.customHotkeys.viewerWhatIs)) {
-    event.preventDefault();
-    const selectedText = window.getSelection().toString().trim();
-    if (selectedText) {
-      const query = encodeURIComponent(`What is ${selectedText}`);
-      await openUrlInNewTabNextToCurrent(`https://www.google.com/search?q=${query}`);
-    }
     return;
   }
   if (isHotkeyMatch(event, state.customHotkeys.viewerEtymology)) {
-    event.preventDefault();
-    const selectedText = window.getSelection().toString().trim();
-    if (selectedText) {
-      const query = encodeURIComponent(`${selectedText} etymology`);
-      await openUrlInNewTabNextToCurrent(`https://www.google.com/search?q=${query}`);
-    }
     return;
   }
   if (isHotkeyMatch(event, state.customHotkeys.viewerTranslateRu)) {
-    event.preventDefault();
-    const selectedText = window.getSelection().toString().trim();
-    if (selectedText) {
-      const text = encodeURIComponent(selectedText);
-      await openUrlInNewTabNextToCurrent(
-        `https://translate.google.com/?sl=auto&tl=ru&text=${text}`
-      );
-    }
     return;
   }
   if (event.ctrlKey && !event.shiftKey && !event.altKey && event.key.toLowerCase() === "o") {
@@ -2013,8 +1989,17 @@ window.addEventListener("keydown", async (event) => {
 }, true);
 
 window.addEventListener("beforeunload", async () => {
+  try {
+    await chrome.storage.local.set({ [PDF_VIEWER_SELECTION_KEY]: "" });
+  } catch {
+    // Ignore storage failures.
+  }
   saveViewState(buildCurrentViewState());
   await closeActiveDocument();
+});
+
+document.addEventListener("selectionchange", () => {
+  persistPdfViewerSelection();
 });
 
 initShortcutsDialog();

@@ -1,14 +1,26 @@
 let lastTabOpenDedupe = { dedupeKey: "", timestampMillis: 0 };
 const tabHistoryByWindowId = new Map();
-const ignoredActivationByWindowId = new Map();
 let previousTabSelectionChain = Promise.resolve();
 const PDF_VIEWER_SELECTION_KEY = "pdfViewerSelectionText";
+const TAB_HISTORY_LIMIT = 200;
+const PREV_TAB_LOG_PREFIX = "[h2n previous-tab]";
+
+function logPreviousTab(message, details) {
+  if (details === undefined) {
+    console.log(`${PREV_TAB_LOG_PREFIX} ${message}`);
+    return;
+  }
+  console.log(`${PREV_TAB_LOG_PREFIX} ${message}`, details);
+}
 
 function pushTabIntoHistory(windowId, tabId) {
   if (typeof windowId !== "number" || typeof tabId !== "number") return;
   const history = tabHistoryByWindowId.get(windowId) || [];
   if (history[history.length - 1] !== tabId) {
     history.push(tabId);
+  }
+  if (history.length > TAB_HISTORY_LIMIT) {
+    history.splice(0, history.length - TAB_HISTORY_LIMIT);
   }
   tabHistoryByWindowId.set(windowId, history);
 }
@@ -22,7 +34,17 @@ async function activatePreviousTabFromHistory() {
 
   const windowId = activeTab.windowId;
   const currentTabId = activeTab.id;
-  const history = tabHistoryByWindowId.get(windowId) || [];
+  const history = [...(tabHistoryByWindowId.get(windowId) || [])];
+  logPreviousTab("Command invoked", {
+    windowId,
+    currentTabId,
+    historyBefore: [...history],
+  });
+
+  const tabsInWindow = await chrome.tabs.query({ windowId });
+  const liveTabIds = new Set(
+    tabsInWindow.map((tab) => tab?.id).filter((id) => typeof id === "number")
+  );
 
   // Ensure current tab is represented, then walk backward.
   if (history[history.length - 1] !== currentTabId) {
@@ -31,20 +53,39 @@ async function activatePreviousTabFromHistory() {
   while (history.length && history[history.length - 1] === currentTabId) {
     history.pop();
   }
+  while (history.length && !liveTabIds.has(history[history.length - 1])) {
+    const staleTabId = history.pop();
+    logPreviousTab("Pruned stale tab from history", {
+      windowId,
+      staleTabId,
+      historyNow: [...history],
+    });
+  }
   while (history.length) {
     const previousTabId = history[history.length - 1];
     if (typeof previousTabId !== "number") {
       history.pop();
       continue;
     }
-    ignoredActivationByWindowId.set(windowId, previousTabId);
     tabHistoryByWindowId.set(windowId, history);
     try {
+      logPreviousTab("Trying activation", {
+        windowId,
+        previousTabId,
+        historyNow: [...history],
+      });
       await chrome.tabs.update(previousTabId, { active: true });
+      logPreviousTab("Activation succeeded", {
+        windowId,
+        previousTabId,
+      });
       return;
     } catch {
       // Tab could have been closed; keep scanning older history entries.
-      ignoredActivationByWindowId.delete(windowId);
+      logPreviousTab("Activation failed, trying older entry", {
+        windowId,
+        previousTabId,
+      });
       while (history.length && history[history.length - 1] === previousTabId) {
         history.pop();
       }
@@ -52,6 +93,10 @@ async function activatePreviousTabFromHistory() {
   }
 
   tabHistoryByWindowId.set(windowId, history);
+  logPreviousTab("No previous tab candidate found", {
+    windowId,
+    historyAfter: [...history],
+  });
 }
 function openTabUnlessDuplicate(dedupeKey, createUrl, insertIndex) {
   const now = Date.now();
@@ -217,12 +262,12 @@ chrome.commands.onCommand.addListener((commandName) => {
 });
 
 chrome.tabs.onActivated.addListener(async (activeInfo) => {
-  const ignoredTabId = ignoredActivationByWindowId.get(activeInfo.windowId);
-  if (ignoredTabId === activeInfo.tabId) {
-    ignoredActivationByWindowId.delete(activeInfo.windowId);
-    return;
-  }
   pushTabIntoHistory(activeInfo.windowId, activeInfo.tabId);
+  logPreviousTab("Recorded activation", {
+    windowId: activeInfo.windowId,
+    tabId: activeInfo.tabId,
+    historyNow: [...(tabHistoryByWindowId.get(activeInfo.windowId) || [])],
+  });
 });
 
 chrome.tabs.onRemoved.addListener((tabId, removeInfo) => {
@@ -231,10 +276,11 @@ chrome.tabs.onRemoved.addListener((tabId, removeInfo) => {
   if (!history?.length) return;
   const cleaned = history.filter((id) => id !== tabId);
   tabHistoryByWindowId.set(removeInfo.windowId, cleaned);
-  const ignoredTabId = ignoredActivationByWindowId.get(removeInfo.windowId);
-  if (ignoredTabId === tabId) {
-    ignoredActivationByWindowId.delete(removeInfo.windowId);
-  }
+  logPreviousTab("Removed tab from history", {
+    windowId: removeInfo.windowId,
+    removedTabId: tabId,
+    historyNow: [...cleaned],
+  });
 });
 
 chrome.action.onClicked.addListener(async (tab) => {

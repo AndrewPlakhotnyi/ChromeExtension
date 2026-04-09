@@ -25,6 +25,27 @@ function pushTabIntoHistory(windowId, tabId) {
   tabHistoryByWindowId.set(windowId, history);
 }
 
+async function activatePreviousTabByStripOrder(windowId, currentTabId) {
+  const tabsInWindow = await chrome.tabs.query({ windowId });
+  const ordered = tabsInWindow
+    .filter(
+      (tab) => typeof tab.id === "number" && typeof tab.index === "number"
+    )
+    .sort((a, b) => a.index - b.index);
+  if (ordered.length < 2) return false;
+  const currentIndex = ordered.findIndex((tab) => tab.id === currentTabId);
+  if (currentIndex < 0) return false;
+  const prevIndex =
+    currentIndex === 0 ? ordered.length - 1 : currentIndex - 1;
+  const targetTab = ordered[prevIndex];
+  try {
+    await chrome.tabs.update(targetTab.id, { active: true });
+    return true;
+  } catch {
+    return false;
+  }
+}
+
 async function activatePreviousTabFromHistory() {
   const [activeTab] = await chrome.tabs.query({
     active: true,
@@ -34,7 +55,8 @@ async function activatePreviousTabFromHistory() {
 
   const windowId = activeTab.windowId;
   const currentTabId = activeTab.id;
-  const history = [...(tabHistoryByWindowId.get(windowId) || [])];
+  const initialStored = [...(tabHistoryByWindowId.get(windowId) || [])];
+  const history = [...initialStored];
   logPreviousTab("Command invoked", {
     windowId,
     currentTabId,
@@ -67,21 +89,20 @@ async function activatePreviousTabFromHistory() {
       history.pop();
       continue;
     }
-    tabHistoryByWindowId.set(windowId, history);
     try {
-      logPreviousTab("Trying activation", {
+      logPreviousTab("Trying activation (MRU)", {
         windowId,
         previousTabId,
         historyNow: [...history],
       });
       await chrome.tabs.update(previousTabId, { active: true });
+      tabHistoryByWindowId.set(windowId, history);
       logPreviousTab("Activation succeeded", {
         windowId,
         previousTabId,
       });
       return;
     } catch {
-      // Tab could have been closed; keep scanning older history entries.
       logPreviousTab("Activation failed, trying older entry", {
         windowId,
         previousTabId,
@@ -92,10 +113,22 @@ async function activatePreviousTabFromHistory() {
     }
   }
 
-  tabHistoryByWindowId.set(windowId, history);
+  const stripOk = await activatePreviousTabByStripOrder(
+    windowId,
+    currentTabId
+  );
+  if (stripOk) {
+    logPreviousTab("Activated via tab strip fallback (left of current)", {
+      windowId,
+      currentTabId,
+    });
+    return;
+  }
+
+  tabHistoryByWindowId.set(windowId, initialStored);
   logPreviousTab("No previous tab candidate found", {
     windowId,
-    historyAfter: [...history],
+    restoredHistory: [...initialStored],
   });
 }
 function openTabUnlessDuplicate(dedupeKey, createUrl, insertIndex) {

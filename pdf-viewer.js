@@ -11,6 +11,7 @@ const toolbarBookMeta = document.querySelector(".toolbar-book-meta");
 const hamburgerButton = document.getElementById("hamburgerButton");
 const openFileButton = document.getElementById("openFileButton");
 const previousBooksButton = document.getElementById("previousBooksButton");
+const openExternalButton = document.getElementById("openExternalButton");
 const metadataButton = document.getElementById("metadataButton");
 const contentsTabButton = document.getElementById("contentsTabButton");
 const pagesTabButton = document.getElementById("pagesTabButton");
@@ -84,6 +85,8 @@ const state = {
   metadataCache: null,
   navigationHistory: [],
   suppressNavigationHistory: false,
+  externalOpenCacheKey: "",
+  externalOpenDownloadId: null,
 };
 
 let viewStatePersistTimer = null;
@@ -110,6 +113,106 @@ async function persistPdfViewerSelection() {
 
 function setStatus(message) {
   statusText.textContent = message;
+}
+
+function normalizePdfFileName(name) {
+  const trimmed = String(name || "").trim();
+  const sanitized = trimmed.replace(/[\\/:*?"<>|]+/g, "_");
+  if (!sanitized) return "document.pdf";
+  return /\.pdf$/i.test(sanitized) ? sanitized : `${sanitized}.pdf`;
+}
+
+function getExternalOpenCacheKey() {
+  if (state.currentBookKey) {
+    return `book:${state.currentBookKey}`;
+  }
+  if (state.sourceUrl) {
+    return `url:${state.sourceUrl}`;
+  }
+  return `name:${state.sourceName || "document.pdf"}`;
+}
+
+function downloadViaChrome(downloadOptions) {
+  return new Promise((resolve, reject) => {
+    chrome.downloads.download(downloadOptions, (downloadId) => {
+      if (chrome.runtime.lastError) {
+        reject(new Error(chrome.runtime.lastError.message));
+        return;
+      }
+      if (typeof downloadId !== "number") {
+        reject(new Error("Download was not created."));
+        return;
+      }
+      resolve(downloadId);
+    });
+  });
+}
+
+function openDownloadedFile(downloadId) {
+  return new Promise((resolve, reject) => {
+    chrome.downloads.open(downloadId, () => {
+      if (chrome.runtime.lastError) {
+        reject(new Error(chrome.runtime.lastError.message));
+        return;
+      }
+      resolve();
+    });
+  });
+}
+
+async function openCurrentPdfInDefaultEditor() {
+  if (!state.pdfDocument) return;
+  const cacheKey = getExternalOpenCacheKey();
+  if (
+    cacheKey &&
+    state.externalOpenCacheKey === cacheKey &&
+    typeof state.externalOpenDownloadId === "number"
+  ) {
+    try {
+      await openDownloadedFile(state.externalOpenDownloadId);
+      setStatus("Downloaded file opened.");
+      return;
+    } catch {
+      // Fall through to re-download if previous file is unavailable.
+    }
+  }
+  const sourceUrl = String(state.sourceUrl || "").trim();
+  let downloadUrl = sourceUrl || state.localObjectUrl;
+  let temporaryObjectUrl = "";
+  if (!downloadUrl) {
+    try {
+      const bytes = await state.pdfDocument.getData();
+      temporaryObjectUrl = URL.createObjectURL(new Blob([bytes], { type: "application/pdf" }));
+      downloadUrl = temporaryObjectUrl;
+    } catch {
+      // Keep fallback below.
+    }
+  }
+  if (!downloadUrl) {
+    setStatus("No PDF source available to open externally.");
+    return;
+  }
+  const filename = normalizePdfFileName(state.sourceName);
+  try {
+    const downloadId = await downloadViaChrome({
+      url: downloadUrl,
+      filename,
+      saveAs: false,
+      conflictAction: "overwrite",
+    });
+    state.externalOpenCacheKey = cacheKey;
+    state.externalOpenDownloadId = downloadId;
+    await openDownloadedFile(downloadId);
+    setStatus("Downloaded file opened.");
+  } catch (error) {
+    setStatus(`Could not download/open file: ${String(error?.message || error)}`);
+  } finally {
+    if (temporaryObjectUrl) {
+      setTimeout(() => {
+        URL.revokeObjectURL(temporaryObjectUrl);
+      }, 15000);
+    }
+  }
 }
 
 function rememberCurrentPlaceForBackNavigation(nextPageNumber, shouldScroll) {
@@ -736,6 +839,7 @@ function updateControls() {
   const pageCount = hasDocument ? state.pdfDocument.numPages : 0;
 
   pageNumberInput.disabled = !hasDocument;
+  openExternalButton.disabled = !hasDocument;
   metadataButton.disabled = !hasDocument;
   contentsTabButton.disabled = !hasDocument || !state.hasContents;
   pagesTabButton.disabled = !hasDocument;
@@ -973,6 +1077,8 @@ async function closeActiveDocument() {
   state.metadataCache = null;
   state.navigationHistory = [];
   state.suppressNavigationHistory = false;
+  state.externalOpenCacheKey = "";
+  state.externalOpenDownloadId = null;
   closeMetadataDialog();
   state.panelMode = null;
   state.panelVisible = true;
@@ -1130,13 +1236,13 @@ function renderOutlineNodes(parentList, nodes, pageEntries = [], pageLabels = []
       const toggleButton = document.createElement("button");
       toggleButton.type = "button";
       toggleButton.className = "toc-item-toggle";
-      toggleButton.textContent = "-";
+      toggleButton.textContent = "+";
       toggleButton.setAttribute("aria-label", `Toggle ${item.title}`);
-      toggleButton.setAttribute("aria-expanded", "true");
+      toggleButton.setAttribute("aria-expanded", "false");
       row.appendChild(toggleButton);
 
       childList = document.createElement("ul");
-      childList.className = "toc-sublist";
+      childList.className = "toc-sublist collapsed";
       renderOutlineNodes(childList, item.children, pageEntries, pageLabels);
 
       toggleButton.addEventListener("click", () => {
@@ -1641,9 +1747,14 @@ function scrollToPage(pageNumber, immediate = false) {
   });
 }
 
-function captureViewportAnchor() {
+function captureViewportAnchor(clientY = null) {
   if (!state.pageElements.length) return null;
-  const viewportCenter = viewerContainer.scrollTop + viewerContainer.clientHeight / 2;
+  const containerRect = viewerContainer.getBoundingClientRect();
+  const defaultOffset = viewerContainer.clientHeight / 2;
+  const clampedOffset = Number.isFinite(clientY)
+    ? Math.min(Math.max(clientY - containerRect.top, 0), Math.max(viewerContainer.clientHeight - 1, 0))
+    : defaultOffset;
+  const anchorY = viewerContainer.scrollTop + clampedOffset;
   let bestPageNumber = 1;
   let bestDistance = Number.POSITIVE_INFINITY;
 
@@ -1653,13 +1764,14 @@ function captureViewportAnchor() {
     const top = page.offsetTop;
     const height = Math.max(page.offsetHeight, 1);
     const bottom = top + height;
-    if (viewportCenter >= top && viewportCenter <= bottom) {
+    if (anchorY >= top && anchorY <= bottom) {
       return {
         pageNumber: i + 1,
-        relativeOffset: (viewportCenter - top) / height,
+        relativeOffset: (anchorY - top) / height,
+        viewportOffset: clampedOffset,
       };
     }
-    const distance = Math.min(Math.abs(viewportCenter - top), Math.abs(viewportCenter - bottom));
+    const distance = Math.min(Math.abs(anchorY - top), Math.abs(anchorY - bottom));
     if (distance < bestDistance) {
       bestDistance = distance;
       bestPageNumber = i + 1;
@@ -1670,7 +1782,8 @@ function captureViewportAnchor() {
   const fallbackHeight = Math.max(fallbackPage?.offsetHeight || 1, 1);
   return {
     pageNumber: bestPageNumber,
-    relativeOffset: (viewportCenter - (fallbackPage?.offsetTop || 0)) / fallbackHeight,
+    relativeOffset: (anchorY - (fallbackPage?.offsetTop || 0)) / fallbackHeight,
+    viewportOffset: clampedOffset,
   };
 }
 
@@ -1679,9 +1792,12 @@ function restoreViewportAnchor(anchor) {
   const pageElement = state.pageElements[anchor.pageNumber - 1];
   if (!pageElement) return;
   const clampedRelative = Math.min(Math.max(anchor.relativeOffset, 0), 1);
-  const targetCenter =
+  const targetY =
     pageElement.offsetTop + Math.max(pageElement.offsetHeight, 1) * clampedRelative;
-  const nextScrollTop = Math.max(0, targetCenter - viewerContainer.clientHeight / 2);
+  const viewportOffset = Number.isFinite(anchor.viewportOffset)
+    ? anchor.viewportOffset
+    : viewerContainer.clientHeight / 2;
+  const nextScrollTop = Math.max(0, targetY - viewportOffset);
   viewerContainer.scrollTop = nextScrollTop;
 }
 
@@ -1703,9 +1819,9 @@ async function setPage(pageNumber, shouldScroll = true, immediate = false) {
   }
 }
 
-async function setScale(nextScale, keepPageAligned = true) {
+async function setScale(nextScale, keepPageAligned = true, anchorClientY = null) {
   if (!state.pdfDocument) return;
-  const anchor = keepPageAligned ? null : captureViewportAnchor();
+  const anchor = keepPageAligned ? null : captureViewportAnchor(anchorClientY);
   state.scale = Math.min(Math.max(0.25, nextScale), 4);
   updateControls();
   state.suppressScrollSync = true;
@@ -1730,6 +1846,9 @@ async function setScale(nextScale, keepPageAligned = true) {
 }
 
 openFileButton.addEventListener("click", () => pdfFileInput.click());
+openExternalButton.addEventListener("click", () => {
+  openCurrentPdfInDefaultEditor();
+});
 previousBooksButton.addEventListener("click", () => {
   openPreviousBooksDialog();
 });
@@ -1836,7 +1955,7 @@ viewerContainer.addEventListener(
     event.preventDefault();
     const rawStep = Math.min(Math.max(Math.abs(event.deltaY) / 600, 0.04), 0.22);
     const zoomStep = event.deltaY < 0 ? rawStep : -rawStep;
-    setScale(state.scale + zoomStep, false);
+    setScale(state.scale + zoomStep, false, event.clientY);
   },
   { passive: false }
 );

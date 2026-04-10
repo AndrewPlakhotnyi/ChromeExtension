@@ -387,6 +387,24 @@ chrome.action.onClicked.addListener(async (tab) => {
 });
 
 chrome.runtime.onMessage.addListener((message, sender) => {
+  if (message?.type === "pdf-db-log") {
+    const level = message?.level === "error" ? "error" : "log";
+    const event = String(message?.event || "event");
+    const details = message?.details || {};
+    const tabId = typeof sender?.tab?.id === "number" ? sender.tab.id : null;
+    const logPayload = {
+      ...details,
+      source: String(message?.source || "unknown"),
+      tabId,
+      at: Number(message?.at) || Date.now(),
+    };
+    if (level === "error") {
+      console.error("[pdf-db]", event, logPayload);
+    } else {
+      console.log("[pdf-db]", event, logPayload);
+    }
+    return;
+  }
   if (typeof message?.text !== "string") return;
   const selectedText = message.text.trim();
   if (!selectedText) return;

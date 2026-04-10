@@ -257,6 +257,42 @@ button:disabled {
   max-width: 220px;
 }
 
+.db-save-status {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 15px;
+  user-select: none;
+  cursor: default;
+}
+
+.db-save-status-saving,
+.db-save-status-loading {
+  color: #f2cb62;
+  animation: db-save-status-spin 0.95s linear infinite;
+}
+
+.db-save-status-saved {
+  color: #6fd18f;
+}
+
+.db-save-status-missing {
+  color: #f2cb62;
+}
+
+.db-save-status-error {
+  color: #e67e7e;
+}
+
+@keyframes db-save-status-spin {
+  from {
+    transform: rotate(0deg);
+  }
+  to {
+    transform: rotate(360deg);
+  }
+}
+
 .viewer-container {
   flex: 1;
   min-height: 0;

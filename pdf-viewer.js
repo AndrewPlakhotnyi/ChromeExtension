@@ -41,14 +41,17 @@ const previousBooksOverlay = document.getElementById("previousBooksOverlay");
 const previousBooksList = document.getElementById("previousBooksList");
 const previousBooksEmpty = document.getElementById("previousBooksEmpty");
 const previousBooksCloseButton = document.getElementById("previousBooksCloseButton");
+const dbSaveStatusIndicator = document.getElementById("dbSaveStatusIndicator");
 
 const LAST_SESSION_DB_NAME = "pdf-viewer-cache";
 const LAST_SESSION_STORE_NAME = "kv";
 const LAST_SESSION_KEY = "last-session";
 const LAST_VIEW_KEY = "last-view";
 const RECENT_BOOKS_KEY = "recent-books";
+const BOOK_FILE_KEY_PREFIX = "book-file:";
 const MAX_RECENT_BOOKS = 16;
 const PDF_VIEWER_SELECTION_KEY = "pdfViewerSelectionText";
+const DB_TRACE_PREFIX = "[pdf-db]";
 
 const state = {
   pdfDocument: null,
@@ -113,6 +116,82 @@ async function persistPdfViewerSelection() {
 
 function setStatus(message) {
   statusText.textContent = message;
+}
+
+function traceDb(event, details) {
+  const payload = details === undefined ? {} : details;
+  try {
+    chrome.runtime.sendMessage({
+      type: "pdf-db-log",
+      level: "log",
+      event,
+      details: payload,
+      source: "pdf-viewer",
+      at: Date.now(),
+    });
+  } catch {
+    // Keep tracing best-effort only.
+  }
+}
+
+function traceDbError(event, error, details = {}) {
+  const payload = {
+    ...details,
+    error: String(error?.message || error),
+  };
+  try {
+    chrome.runtime.sendMessage({
+      type: "pdf-db-log",
+      level: "error",
+      event,
+      details: payload,
+      source: "pdf-viewer",
+      at: Date.now(),
+    });
+  } catch {
+    // Keep tracing best-effort only.
+  }
+}
+
+function setDbSaveIndicator(mode, message = "") {
+  if (!dbSaveStatusIndicator) return;
+  const normalizedMode =
+    mode === "saving" ||
+    mode === "loading" ||
+    mode === "saved" ||
+    mode === "missing" ||
+    mode === "error"
+      ? mode
+      : "idle";
+  const glyphByMode = {
+    idle: "○",
+    saving: "↻",
+    loading: "↻",
+    saved: "✓",
+    missing: "⚠",
+    error: "✕",
+  };
+  const defaultTitleByMode = {
+    idle: "Database status: idle",
+    saving: "Database status: saving PDF",
+    loading: "Database status: loading PDF from database",
+    saved: "Database status: PDF stored in database",
+    missing: "Database status: PDF not found in database",
+    error: "Database status: database error",
+  };
+  dbSaveStatusIndicator.textContent = glyphByMode[normalizedMode];
+  dbSaveStatusIndicator.classList.remove(
+    "db-save-status-idle",
+    "db-save-status-saving",
+    "db-save-status-loading",
+    "db-save-status-saved",
+    "db-save-status-missing",
+    "db-save-status-error"
+  );
+  dbSaveStatusIndicator.classList.add(`db-save-status-${normalizedMode}`);
+  const title = message || defaultTitleByMode[normalizedMode];
+  dbSaveStatusIndicator.title = title;
+  dbSaveStatusIndicator.setAttribute("aria-label", title);
 }
 
 function normalizePdfFileName(name) {
@@ -517,7 +596,7 @@ function isEditableTarget(target) {
 
 function openLastSessionDb() {
   return new Promise((resolve, reject) => {
-    const request = indexedDB.open(LAST_SESSION_DB_NAME, 1);
+    const request = indexedDB.open(LAST_SESSION_DB_NAME);
     request.onupgradeneeded = () => {
       const database = request.result;
       if (!database.objectStoreNames.contains(LAST_SESSION_STORE_NAME)) {
@@ -525,8 +604,72 @@ function openLastSessionDb() {
       }
     };
     request.onsuccess = () => resolve(request.result);
+    request.onblocked = () => {
+      const error = new Error("IndexedDB open is blocked by another tab/session.");
+      traceDbError("open-blocked", error);
+      reject(error);
+    };
     request.onerror = () => reject(request.error);
   });
+}
+
+async function saveBookFileData(bookKey, dataBytes) {
+  if (!bookKey || !dataBytes) return false;
+  try {
+    const safeBytes =
+      dataBytes instanceof Uint8Array ? dataBytes.slice() : new Uint8Array(dataBytes);
+    const storageKey = `${BOOK_FILE_KEY_PREFIX}${bookKey}`;
+    traceDb("save-start", {
+      bookKey,
+      storageKey,
+      bytes: Number(safeBytes?.byteLength) || 0,
+    });
+    const db = await openLastSessionDb();
+    await new Promise((resolve, reject) => {
+      const tx = db.transaction(LAST_SESSION_STORE_NAME, "readwrite");
+      const store = tx.objectStore(LAST_SESSION_STORE_NAME);
+      store.put({ data: safeBytes, savedAt: Date.now() }, storageKey);
+      tx.oncomplete = () => resolve();
+      tx.onerror = () => reject(tx.error);
+    });
+    db.close();
+    traceDb("save-ok", { bookKey });
+    return true;
+  } catch (error) {
+    traceDbError("save-failed", error, { bookKey });
+    setStatus(`DB save failed: ${String(error?.message || error)}`);
+    traceDb("save-failed", { bookKey, error: String(error?.message || error) });
+    // Ignore storage failures to keep viewer usable.
+    return false;
+  }
+}
+
+async function readBookFileData(bookKey) {
+  if (!bookKey) return null;
+  try {
+    const storageKey = `${BOOK_FILE_KEY_PREFIX}${bookKey}`;
+    traceDb("read-start", { bookKey });
+    const db = await openLastSessionDb();
+    const result = await new Promise((resolve, reject) => {
+      const tx = db.transaction(LAST_SESSION_STORE_NAME, "readonly");
+      const store = tx.objectStore(LAST_SESSION_STORE_NAME);
+      const request = store.get(storageKey);
+      request.onsuccess = () => resolve(request.result || null);
+      request.onerror = () => reject(request.error);
+    });
+    db.close();
+    const data = result?.data || null;
+    traceDb(data ? "read-hit" : "read-miss", {
+      bookKey,
+      storageKey,
+      bytes: Number(data?.byteLength) || 0,
+    });
+    return data;
+  } catch (error) {
+    traceDbError("read-failed", error, { bookKey });
+    traceDb("read-failed", { bookKey, error: String(error?.message || error) });
+    return null;
+  }
 }
 
 async function saveLastSession(record) {
@@ -703,9 +846,26 @@ async function openRecentBookFromDialog(item) {
     pageNumber: Number(item.lastPage) || 1,
   };
   if (item.type === "local") {
+    traceDb("open-recent-local-start", {
+      bookKey: item.bookKey || "",
+      name: item.name || "",
+    });
+    setDbSaveIndicator("loading", `Loading "${item.name || "document.pdf"}" from database...`);
     let localBytes = null;
-    if (item.data) {
+    const bookData = await readBookFileData(item.bookKey || "");
+    if (bookData) {
+      localBytes = new Uint8Array(bookData);
+      traceDb("open-recent-local-source-db", {
+        bookKey: item.bookKey || "",
+        bytes: localBytes.byteLength,
+      });
+    } else if (item.data) {
       localBytes = new Uint8Array(item.data);
+      traceDb("open-recent-local-source-recents-item-data", {
+        bookKey: item.bookKey || "",
+        bytes: localBytes.byteLength,
+      });
+      setDbSaveIndicator("missing", "Not in database. Using fallback cached entry data.");
     } else {
       const lastSession = await readLastSession();
       if (
@@ -714,10 +874,19 @@ async function openRecentBookFromDialog(item) {
         (lastSession.name || "") === (item.name || "")
       ) {
         localBytes = new Uint8Array(lastSession.data);
+        traceDb("open-recent-local-source-last-session", {
+          bookKey: item.bookKey || "",
+          bytes: localBytes.byteLength,
+        });
+        setDbSaveIndicator("missing", "Not in database. Using last-session fallback.");
       }
     }
     if (!localBytes) {
       setStatus("Local file data is unavailable. Please open the file again.");
+      setDbSaveIndicator("error", "Database: file bytes unavailable.");
+      traceDb("open-recent-local-failed-no-bytes", {
+        bookKey: item.bookKey || "",
+      });
       return;
     }
     const blob = new Blob([localBytes], { type: "application/pdf" });
@@ -739,9 +908,17 @@ async function openRecentBookFromDialog(item) {
       ...item,
       lastPage: Number(item.lastPage) || 1,
     });
+    if (bookData) {
+      setDbSaveIndicator("saved", `Loaded "${item.name || "document.pdf"}" from database.`);
+    }
+    traceDb("open-recent-local-ok", {
+      bookKey: item.bookKey || "",
+      page: Number(item.lastPage) || 1,
+    });
     return;
   }
   if (item.type === "url" && typeof item.url === "string") {
+    setDbSaveIndicator("idle", "Database status not applicable for URL books.");
     await loadDocument(
       { url: item.url },
       item.name || item.url.split("/").pop() || "document.pdf",
@@ -1079,6 +1256,7 @@ async function closeActiveDocument() {
   state.suppressNavigationHistory = false;
   state.externalOpenCacheKey = "";
   state.externalOpenDownloadId = null;
+  setDbSaveIndicator("idle");
   closeMetadataDialog();
   state.panelMode = null;
   state.panelVisible = true;
@@ -1645,9 +1823,11 @@ async function openPdfFromFile(file) {
   const isPdf = file.type === "application/pdf" || file.name.toLowerCase().endsWith(".pdf");
   if (!isPdf) {
     setStatus("Please choose a PDF file.");
+    setDbSaveIndicator("error", "Selected file is not a PDF.");
     return;
   }
   const bytes = new Uint8Array(await file.arrayBuffer());
+  const persistableBytes = bytes.slice();
   revokeLocalObjectUrl();
   state.localObjectUrl = URL.createObjectURL(file);
   const localCaption = sanitizePathCaption(
@@ -1658,6 +1838,14 @@ async function openPdfFromFile(file) {
   const previewDataUrl = await renderBookPreviewFromCurrentDocument();
   const bookKey = createLocalBookKey(file);
   state.currentBookKey = bookKey;
+  setDbSaveIndicator("saving", `Saving "${file.name}" to database...`);
+  const dbSaved = await saveBookFileData(bookKey, persistableBytes);
+  if (dbSaved) {
+    setDbSaveIndicator("saved", `Saved "${file.name}" to database.`);
+  } else {
+    setDbSaveIndicator("error", `Failed to save "${file.name}" to database.`);
+    setStatus("Loaded PDF, but failed to store it in database.");
+  }
   await upsertRecentBook({
     bookKey,
     type: "local",
@@ -1668,7 +1856,7 @@ async function openPdfFromFile(file) {
   await saveLastSession({
     type: "local",
     name: file.name,
-    data: bytes.buffer,
+    data: persistableBytes.buffer,
   });
 }
 
@@ -1687,6 +1875,7 @@ async function openPdfFromUrl(rawValue) {
     }
     const url = parsed.toString();
     await loadDocument({ url }, parsed.pathname.split("/").pop() || "document.pdf", url, url);
+    setDbSaveIndicator("idle", "Database status not applicable for URL books.");
     const previewDataUrl = await renderBookPreviewFromCurrentDocument();
     const bookKey = createUrlBookKey(url);
     state.currentBookKey = bookKey;
@@ -1725,6 +1914,10 @@ async function restoreLastSessionIfAny() {
         "Restored local file"
       );
       state.currentBookKey = "";
+      setDbSaveIndicator(
+        "missing",
+        "Restored from last session cache. Database presence is not confirmed."
+      );
       setStatus(`Restored: ${lastSession.name || "document.pdf"}`);
       return;
     } catch {
@@ -2133,4 +2326,5 @@ chrome.storage.onChanged.addListener((changes, areaName) => {
 
 updateControls();
 updateThemeButton();
+setDbSaveIndicator("idle");
 restoreLastSessionIfAny();

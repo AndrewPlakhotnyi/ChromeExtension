@@ -1,9 +1,11 @@
 let lastTabOpenDedupe = { dedupeKey: "", timestampMillis: 0 };
 const tabHistoryByWindowId = new Map();
 let previousTabSelectionChain = Promise.resolve();
+let nextTabSelectionChain = Promise.resolve();
 const PDF_VIEWER_SELECTION_KEY = "pdfViewerSelectionText";
 const TAB_HISTORY_LIMIT = 200;
 const PREV_TAB_LOG_PREFIX = "[h2n previous-tab]";
+const NEXT_TAB_LOG_PREFIX = "[h2n next-tab]";
 
 function logPreviousTab(message, details) {
   if (details === undefined) {
@@ -11,6 +13,14 @@ function logPreviousTab(message, details) {
     return;
   }
   console.log(`${PREV_TAB_LOG_PREFIX} ${message}`, details);
+}
+
+function logNextTab(message, details) {
+  if (details === undefined) {
+    console.log(`${NEXT_TAB_LOG_PREFIX} ${message}`);
+    return;
+  }
+  console.log(`${NEXT_TAB_LOG_PREFIX} ${message}`, details);
 }
 
 function pushTabIntoHistory(windowId, tabId) {
@@ -43,6 +53,47 @@ async function activatePreviousTabByStripOrder(windowId, currentTabId) {
     return true;
   } catch {
     return false;
+  }
+}
+
+async function activateNextTabByStripOrder(windowId, currentTabId) {
+  const tabsInWindow = await chrome.tabs.query({ windowId });
+  const ordered = tabsInWindow
+    .filter(
+      (tab) => typeof tab.id === "number" && typeof tab.index === "number"
+    )
+    .sort((a, b) => a.index - b.index);
+  if (ordered.length < 2) return false;
+  const currentIndex = ordered.findIndex((tab) => tab.id === currentTabId);
+  if (currentIndex < 0) return false;
+  const nextIndex =
+    currentIndex === ordered.length - 1 ? 0 : currentIndex + 1;
+  const targetTab = ordered[nextIndex];
+  try {
+    await chrome.tabs.update(targetTab.id, { active: true });
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+async function activateNextTabFromStrip() {
+  const [activeTab] = await chrome.tabs.query({
+    active: true,
+    currentWindow: true,
+  });
+  if (!activeTab?.id || typeof activeTab.windowId !== "number") return;
+  const windowId = activeTab.windowId;
+  const currentTabId = activeTab.id;
+  logNextTab("Command invoked", { windowId, currentTabId });
+  const ok = await activateNextTabByStripOrder(windowId, currentTabId);
+  if (ok) {
+    logNextTab("Activated via tab strip (right of current)", {
+      windowId,
+      currentTabId,
+    });
+  } else {
+    logNextTab("No next tab candidate found", { windowId, currentTabId });
   }
 }
 
@@ -249,6 +300,15 @@ async function runCommand(commandName) {
         // Keep the chain alive if one selection attempt fails.
       });
     await previousTabSelectionChain;
+    return;
+  }
+  if (commandName === "select-next-tab") {
+    nextTabSelectionChain = nextTabSelectionChain
+      .then(() => activateNextTabFromStrip())
+      .catch(() => {
+        // Keep the chain alive if one selection attempt fails.
+      });
+    await nextTabSelectionChain;
     return;
   }
   const [activeTab] = await chrome.tabs.query({

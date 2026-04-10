@@ -874,6 +874,10 @@ body.panel-open .panel-side-toggle {
   margin: 0;
 }
 
+.previous-book-card {
+  position: relative;
+}
+
 .previous-book-button {
   width: 100%;
   border: 1px solid #373737;
@@ -892,6 +896,29 @@ body.panel-open .panel-side-toggle {
 .previous-book-button:hover {
   border-color: #6f6f6f;
   background: #2a2a2a;
+}
+
+.previous-book-remove {
+  position: absolute;
+  top: 6px;
+  right: 6px;
+  width: 24px;
+  min-width: 24px;
+  height: 24px;
+  border-radius: 999px;
+  border: 0;
+  background: rgba(0, 0, 0, 0.45);
+  color: #f0f0f0;
+  font-size: 16px;
+  line-height: 1;
+  padding: 0;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.previous-book-remove:hover {
+  background: rgba(200, 60, 60, 0.85);
 }
 
 .previous-book-preview {
@@ -974,6 +1001,16 @@ body.panel-open .panel-side-toggle {
 .light .previous-book-button:hover {
   background: #f2f6ff;
   border-color: #adc0eb;
+}
+
+.light .previous-book-remove {
+  background: rgba(35, 50, 82, 0.12);
+  color: #273552;
+}
+
+.light .previous-book-remove:hover {
+  background: rgba(200, 60, 60, 0.85);
+  color: #fff;
 }
 
 .light .previous-book-preview {

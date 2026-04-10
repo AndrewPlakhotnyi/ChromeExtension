@@ -672,6 +672,28 @@ async function readBookFileData(bookKey) {
   }
 }
 
+async function deleteBookFileData(bookKey) {
+  if (!bookKey) return false;
+  try {
+    const storageKey = `${BOOK_FILE_KEY_PREFIX}${bookKey}`;
+    traceDb("delete-start", { bookKey, storageKey });
+    const db = await openLastSessionDb();
+    await new Promise((resolve, reject) => {
+      const tx = db.transaction(LAST_SESSION_STORE_NAME, "readwrite");
+      const store = tx.objectStore(LAST_SESSION_STORE_NAME);
+      store.delete(storageKey);
+      tx.oncomplete = () => resolve();
+      tx.onerror = () => reject(tx.error);
+    });
+    db.close();
+    traceDb("delete-ok", { bookKey, storageKey });
+    return true;
+  } catch (error) {
+    traceDbError("delete-failed", error, { bookKey });
+    return false;
+  }
+}
+
 async function saveLastSession(record) {
   try {
     const db = await openLastSessionDb();
@@ -936,6 +958,20 @@ async function openRecentBookFromDialog(item) {
   }
 }
 
+async function removeRecentBookFromDialog(item) {
+  if (!item?.bookKey) return;
+  const existing = await readRecentBooks();
+  const next = existing.filter((entry) => entry?.bookKey !== item.bookKey);
+  await saveRecentBooks(next);
+  if (item.type === "local") {
+    await deleteBookFileData(item.bookKey);
+  }
+  if (state.currentBookKey && state.currentBookKey === item.bookKey) {
+    setStatus(`Removed "${item.name || "document.pdf"}" from Books list.`);
+  }
+  renderPreviousBooksDialogItems(next);
+}
+
 function renderPreviousBooksDialogItems(items) {
   if (!previousBooksList || !previousBooksEmpty) return;
   previousBooksList.textContent = "";
@@ -943,6 +979,9 @@ function renderPreviousBooksDialogItems(items) {
   for (const item of items) {
     const li = document.createElement("li");
     li.className = "previous-book-item";
+
+    const card = document.createElement("div");
+    card.className = "previous-book-card";
 
     const button = document.createElement("button");
     button.type = "button";
@@ -976,7 +1015,21 @@ function renderPreviousBooksDialogItems(items) {
     meta.appendChild(subtitle);
     button.appendChild(meta);
 
-    li.appendChild(button);
+    const removeButton = document.createElement("button");
+    removeButton.type = "button";
+    removeButton.className = "previous-book-remove";
+    removeButton.textContent = "×";
+    removeButton.title = "Remove from Books";
+    removeButton.setAttribute("aria-label", `Remove ${item.name || "book"} from Books`);
+    removeButton.addEventListener("click", async (event) => {
+      event.preventDefault();
+      event.stopPropagation();
+      await removeRecentBookFromDialog(item);
+    });
+
+    card.appendChild(button);
+    card.appendChild(removeButton);
+    li.appendChild(card);
     previousBooksList.appendChild(li);
   }
 }
